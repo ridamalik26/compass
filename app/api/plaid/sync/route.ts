@@ -1,5 +1,5 @@
 import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid'
-import { supabase } from '@/lib/supabase'
+import { createServerClient, getAuthUser } from '@/lib/supabase-server'
 
 const configuration = new Configuration({
   basePath: PlaidEnvironments[process.env.PLAID_ENV as keyof typeof PlaidEnvironments ?? 'sandbox'],
@@ -14,13 +14,16 @@ const configuration = new Configuration({
 const plaidClient = new PlaidApi(configuration)
 
 export async function POST(request: Request) {
-  try {
-    const { userSessionId } = await request.json()
+  const { user, error: authError } = await getAuthUser(request)
+  if (!user) return Response.json({ error: authError }, { status: 401 })
 
+  const supabase = createServerClient(request.headers.get('Authorization'))
+
+  try {
     const tokenRow = await supabase
       .from('plaid_tokens')
       .select('access_token')
-      .eq('user_session_id', userSessionId)
+      .eq('user_session_id', user.id)
       .single()
 
     if (tokenRow.error || !tokenRow.data) {
@@ -38,34 +41,31 @@ export async function POST(request: Request) {
 
     const transactions = txRes.data.transactions
 
-    // Upsert transactions into DB
     if (transactions.length > 0) {
       await supabase.from('transactions').upsert(
         transactions.map((tx) => ({
-          user_session_id: userSessionId,
+          user_session_id: user.id,
           transaction_id: tx.transaction_id,
           amount: tx.amount,
           date: tx.date,
-          description: tx.name,
+          description: tx.merchant_name ?? tx.original_description ?? null,
           category: tx.personal_finance_category?.primary ?? null,
         })),
         { onConflict: 'transaction_id' },
       )
     }
 
-    // Calculate net savings: income (negative Plaid amounts = money in) minus expenses
-    // Plaid convention: positive amount = debit (money out), negative = credit (money in)
+    // Plaid: positive amount = debit (money out), negative = credit (money in)
     const netSavings = transactions.reduce((sum, tx) => sum + (tx.amount > 0 ? -tx.amount : Math.abs(tx.amount)), 0)
 
     if (netSavings <= 0) {
       return Response.json({ synced: transactions.length, netSavings: 0, updated: false })
     }
 
-    // Fetch current progress to add net savings proportionally (equal split)
     const progressRes = await supabase
       .from('goal_progress')
       .select('*')
-      .eq('user_session_id', userSessionId)
+      .eq('user_session_id', user.id)
 
     const currentProgress: Record<string, number> = {}
     for (const row of progressRes.data ?? []) {
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
       types.map((t) =>
         supabase.from('goal_progress').upsert(
           {
-            user_session_id: userSessionId,
+            user_session_id: user.id,
             goal_type: t,
             current_amount: (currentProgress[t] ?? 0) + share,
             updated_at: new Date().toISOString(),

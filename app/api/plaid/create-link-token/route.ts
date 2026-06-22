@@ -1,4 +1,5 @@
 import { Configuration, PlaidApi, PlaidEnvironments, Products, CountryCode } from 'plaid'
+import { getAuthUser } from '@/lib/supabase-server'
 
 const configuration = new Configuration({
   basePath: PlaidEnvironments[process.env.PLAID_ENV as keyof typeof PlaidEnvironments ?? 'sandbox'],
@@ -13,11 +14,12 @@ const configuration = new Configuration({
 const plaidClient = new PlaidApi(configuration)
 
 export async function POST(request: Request) {
-  try {
-    const { userSessionId } = await request.json()
+  const { user, error: authError } = await getAuthUser(request)
+  if (!user) return Response.json({ error: authError }, { status: 401 })
 
+  try {
     const response = await plaidClient.linkTokenCreate({
-      user: { client_user_id: userSessionId },
+      user: { client_user_id: user.id },
       client_name: 'Compass',
       products: [Products.Transactions],
       country_codes: [CountryCode.Us],

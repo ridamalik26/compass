@@ -153,18 +153,25 @@ function GoalCreationForm({ userId, onCreated }: { userId: string; onCreated: ()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  async function handleSubmit(e: React.FormEvent) {
+  function isFilled(f: GoalField) {
+    return f.title.trim().length > 0 && f.amount.trim().length > 0
+  }
+
+  const atLeastOneFilled = isFilled(sixMonth) || isFilled(oneYear) || isFilled(fiveYear)
+
+  async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
+    if (!atLeastOneFilled) return
     setSaving(true)
     setError('')
 
     const { error: err } = await supabase.from('goals').insert({
       user_session_id: userId,
-      goal_6month_title: sixMonth.title.trim() || 'Short-term savings',
+      goal_6month_title: sixMonth.title.trim(),
       goal_6month_amount: parseFloat(sixMonth.amount) || 0,
-      goal_1year_title: oneYear.title.trim() || 'Annual savings',
+      goal_1year_title: oneYear.title.trim(),
       goal_1year_amount: parseFloat(oneYear.amount) || 0,
-      goal_5year_title: fiveYear.title.trim() || 'Long-term savings',
+      goal_5year_title: fiveYear.title.trim(),
       goal_5year_amount: parseFloat(fiveYear.amount) || 0,
     })
 
@@ -179,8 +186,8 @@ function GoalCreationForm({ userId, onCreated }: { userId: string; onCreated: ()
 
   const goalCards: { label: string; badge: string; color: string; state: GoalField; set: (v: GoalField) => void }[] = [
     { label: '6-Month Goal', badge: '6 mo', color: 'emerald', state: sixMonth, set: setSixMonth },
-    { label: '1-Year Goal', badge: '1 yr', color: 'indigo', state: oneYear, set: setOneYear },
-    { label: '5-Year Goal', badge: '5 yr', color: 'amber', state: fiveYear, set: setFiveYear },
+    { label: '1-Year Goal',  badge: '1 yr',  color: 'indigo',  state: oneYear,   set: setOneYear },
+    { label: '5-Year Goal',  badge: '5 yr',  color: 'amber',   state: fiveYear,  set: setFiveYear },
   ]
 
   const colorMap: Record<string, { border: string; ring: string; badge: string; icon: string }> = {
@@ -200,20 +207,26 @@ function GoalCreationForm({ userId, onCreated }: { userId: string; onCreated: ()
           </svg>
         </div>
         <h1 className="font-heading text-2xl font-bold tracking-tight text-[#0F172A]">Set your financial targets</h1>
-        <p className="mt-2 text-sm text-[#64748B]">Define goals across three time horizons and start tracking your progress.</p>
+        <p className="mt-2 text-sm text-[#64748B]">Fill in at least one goal to get started. You can add more later.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {goalCards.map(({ label, badge, color, state, set }) => {
             const c = colorMap[color]
+            const filled = isFilled(state)
             return (
-              <div key={label} className={`rounded-2xl border border-[#E2E8F0] border-t-4 ${c.border} bg-white p-5 shadow-sm space-y-4`}>
-                <div>
-                  <span className={`inline-block rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${c.badge}`}>
-                    {badge}
+              <div key={label} className={`rounded-2xl border border-t-4 ${c.border} bg-white p-5 shadow-sm space-y-4 transition-all ${filled ? 'border-[#E2E8F0] shadow-md' : 'border-[#E2E8F0]'}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className={`inline-block rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${c.badge}`}>
+                      {badge}
+                    </span>
+                    <h3 className="font-heading mt-2 text-sm font-bold text-[#0F172A]">{label}</h3>
+                  </div>
+                  <span className="mt-1 shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-[#94A3B8]">
+                    optional
                   </span>
-                  <h3 className="font-heading mt-2 text-sm font-bold text-[#0F172A]">{label}</h3>
                 </div>
 
                 <div className="space-y-3">
@@ -248,6 +261,10 @@ function GoalCreationForm({ userId, onCreated }: { userId: string; onCreated: ()
           })}
         </div>
 
+        {!atLeastOneFilled && (
+          <p className="text-center text-xs text-[#94A3B8]">Fill in at least one goal card above to continue.</p>
+        )}
+
         {error && (
           <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3">
             <p className="text-sm text-red-600">{error}</p>
@@ -256,8 +273,8 @@ function GoalCreationForm({ userId, onCreated }: { userId: string; onCreated: ()
 
         <button
           type="submit"
-          disabled={saving}
-          className="w-full rounded-xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:opacity-60 min-h-[48px]"
+          disabled={saving || !atLeastOneFilled}
+          className="w-full rounded-xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed min-h-[48px]"
         >
           {saving ? (
             <span className="flex items-center justify-center gap-2">
@@ -419,6 +436,15 @@ export default function DashboardPage() {
   }, [toast])
 
   const fetchRecommendations = useCallback(async (goalsData: Goals, progressData: Progress) => {
+    const allGoals = [
+      { type: '6month' as GoalType, title: goalsData.goal_6month_title, targetAmount: goalsData.goal_6month_amount, currentAmount: progressData['6month'], daysTotal: 180  },
+      { type: '1year'  as GoalType, title: goalsData.goal_1year_title,  targetAmount: goalsData.goal_1year_amount,  currentAmount: progressData['1year'],  daysTotal: 365  },
+      { type: '5year'  as GoalType, title: goalsData.goal_5year_title,  targetAmount: goalsData.goal_5year_amount,  currentAmount: progressData['5year'],  daysTotal: 1825 },
+    ]
+    const activeGoals = allGoals.filter(g => g.targetAmount > 0 && g.title.trim().length > 0)
+
+    if (activeGoals.length === 0) return
+
     setRecLoading(true)
     setRecError('')
     setRecommendation('')
@@ -427,11 +453,11 @@ export default function DashboardPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          goals: [
-            { type: '6month', title: goalsData.goal_6month_title, targetAmount: goalsData.goal_6month_amount, currentAmount: progressData['6month'], daysTotal: 180, createdAt: goalsData.created_at, status: getStatus(goalsData.goal_6month_amount, progressData['6month'], 180, goalsData.created_at) },
-            { type: '1year',  title: goalsData.goal_1year_title,  targetAmount: goalsData.goal_1year_amount,  currentAmount: progressData['1year'],  daysTotal: 365, createdAt: goalsData.created_at, status: getStatus(goalsData.goal_1year_amount, progressData['1year'], 365, goalsData.created_at) },
-            { type: '5year',  title: goalsData.goal_5year_title,  targetAmount: goalsData.goal_5year_amount,  currentAmount: progressData['5year'],  daysTotal: 1825, createdAt: goalsData.created_at, status: getStatus(goalsData.goal_5year_amount, progressData['5year'], 1825, goalsData.created_at) },
-          ],
+          goals: activeGoals.map(g => ({
+            ...g,
+            createdAt: goalsData.created_at,
+            status: getStatus(g.targetAmount, g.currentAmount, g.daysTotal, goalsData.created_at),
+          })),
         }),
       })
       const data = await res.json()
@@ -543,8 +569,17 @@ export default function DashboardPage() {
 
   if (!goals) return null
 
-  const totalTarget = goals.goal_6month_amount + goals.goal_1year_amount + goals.goal_5year_amount
-  const totalSaved = progress['6month'] + progress['1year'] + progress['5year']
+  // Only count goals with a real target set
+  function isActiveGoal(title: string, amount: number) {
+    return amount > 0 && title.trim().length > 0
+  }
+  const active6month = isActiveGoal(goals.goal_6month_title, goals.goal_6month_amount)
+  const active1year  = isActiveGoal(goals.goal_1year_title,  goals.goal_1year_amount)
+  const active5year  = isActiveGoal(goals.goal_5year_title,  goals.goal_5year_amount)
+  const anyActiveGoal = active6month || active1year || active5year
+
+  const totalTarget = (active6month ? goals.goal_6month_amount : 0) + (active1year ? goals.goal_1year_amount : 0) + (active5year ? goals.goal_5year_amount : 0)
+  const totalSaved  = (active6month ? progress['6month'] : 0) + (active1year ? progress['1year'] : 0) + (active5year ? progress['5year'] : 0)
   const totalPct = progressPercent(totalSaved, totalTarget)
   const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
@@ -563,19 +598,21 @@ export default function DashboardPage() {
           <p className="mt-0.5 text-sm text-[#64748B]">{todayStr}</p>
         </div>
 
-        {/* ── 3-metric summary bar ── */}
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: 'Total Saved',  value: fmtUSD(totalSaved),  border: 'border-l-emerald-500' },
-            { label: 'Total Target', value: fmtUSD(totalTarget), border: 'border-l-indigo-500' },
-            { label: 'Progress',     value: `${totalPct}%`,      border: 'border-l-amber-400' },
-          ].map(({ label, value, border }) => (
-            <div key={label} className={`card-hover rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-sm border-l-4 ${border}`}>
-              <p className="text-[11px] font-medium text-[#94A3B8] uppercase tracking-wide">{label}</p>
-              <p className="font-heading mt-1.5 text-xl font-bold text-[#0F172A] leading-none">{value}</p>
-            </div>
-          ))}
-        </div>
+        {/* ── 3-metric summary bar (hidden if all goals cleared) ── */}
+        {anyActiveGoal && (
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: 'Total Saved',  value: fmtUSD(totalSaved),  border: 'border-l-emerald-500' },
+              { label: 'Total Target', value: fmtUSD(totalTarget), border: 'border-l-indigo-500' },
+              { label: 'Progress',     value: `${totalPct}%`,      border: 'border-l-amber-400' },
+            ].map(({ label, value, border }) => (
+              <div key={label} className={`card-hover rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-sm border-l-4 ${border}`}>
+                <p className="text-[11px] font-medium text-[#94A3B8] uppercase tracking-wide">{label}</p>
+                <p className="font-heading mt-1.5 text-xl font-bold text-[#0F172A] leading-none">{value}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* ── Weekly snapshot ── */}
         {weeklySaved !== null && (
@@ -600,7 +637,8 @@ export default function DashboardPage() {
           <GoalCard type="5year"  badge="5 yr"  title={goals.goal_5year_title}  description={goals.goal_5year_description}  targetAmount={goals.goal_5year_amount}  currentAmount={progress['5year']}  daysTotal={DAYS_TOTAL['5year']}  createdAt={goals.created_at} onSave={saveProgress} />
         </section>
 
-        {/* ── AI Coach ── */}
+        {/* ── AI Coach (only when at least one active goal exists) ── */}
+        {anyActiveGoal && (
         <section>
           <div className="rounded-2xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
             <div className="border-l-4 border-indigo-500 p-5 space-y-4">
@@ -654,6 +692,7 @@ export default function DashboardPage() {
             </div>
           </div>
         </section>
+        )}
 
         {/* ── Quick actions ── */}
         <section>

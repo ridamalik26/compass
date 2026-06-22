@@ -15,18 +15,25 @@ export default function ConnectBankPage() {
   const [linkToken, setLinkToken] = useState<string | null>(null)
   const [status, setStatus] = useState<'idle' | 'linking' | 'syncing' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [accessToken, setAccessToken] = useState<string | null>(null)
 
   useEffect(() => {
     async function init() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
-      setSessionId(user.id)
+
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) { router.push('/login'); return }
+      setAccessToken(session.access_token)
+
       try {
         const r = await fetch('/api/plaid/create-link-token', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userSessionId: user.id }),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({}),
         })
         const data = await r.json()
         if (data.link_token) setLinkToken(data.link_token)
@@ -41,11 +48,13 @@ export default function ConnectBankPage() {
   const onSuccess = useCallback(
     async (publicToken: string) => {
       setStatus('linking')
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
       try {
         const exchangeRes = await fetch('/api/plaid/exchange-token', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ publicToken, userSessionId: sessionId }),
+          headers,
+          body: JSON.stringify({ publicToken }),
         })
         const exchangeData = await exchangeRes.json()
         if (!exchangeData.success) {
@@ -57,8 +66,8 @@ export default function ConnectBankPage() {
         setStatus('syncing')
         const syncRes = await fetch('/api/plaid/sync', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userSessionId: sessionId }),
+          headers,
+          body: JSON.stringify({}),
         })
         const syncData = await syncRes.json()
         if (syncData.error) { setStatus('error'); setMessage(syncData.error); return }
@@ -74,7 +83,7 @@ export default function ConnectBankPage() {
         setMessage('An unexpected error occurred.')
       }
     },
-    [sessionId],
+    [accessToken],
   )
 
   const { open, ready } = usePlaidLink({ token: linkToken, onSuccess, onExit: () => setStatus('idle') })

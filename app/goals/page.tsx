@@ -2,13 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import Navbar from '@/components/Navbar'
 import Toast from '@/components/Toast'
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend,
-} from 'recharts'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,22 +32,6 @@ interface Progress {
 
 type GoalType = '6month' | '1year' | '5year'
 
-interface ChartPoint {
-  date: string
-  '6month': number
-  '1year': number
-  '5year': number
-}
-
-interface GoalSlot {
-  type: GoalType
-  label: string
-  badge: string
-  title: string
-  amount: number
-  description: string | null
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtUSD(n: number) {
@@ -61,23 +42,250 @@ function pct(current: number, target: number) {
   return target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0
 }
 
-const CHART_LABEL: Record<GoalType, string> = {
-  '6month': '6-Month',
-  '1year': '1-Year',
-  '5year': '5-Year',
-}
-
-// ─── Animated bar ─────────────────────────────────────────────────────────────
-
-function AnimatedBar({ percent }: { percent: number }) {
+function AnimatedBar({ percent, color }: { percent: number; color: string }) {
   const [w, setW] = useState(0)
   useEffect(() => {
     const t = setTimeout(() => setW(percent), 150)
     return () => clearTimeout(t)
   }, [percent])
   return (
-    <div className="h-1 w-full overflow-hidden rounded-full bg-[#E2E8F0]">
-      <div className="h-full rounded-full bg-emerald-500 transition-all duration-1000 ease-out" style={{ width: `${w}%` }} />
+    <div className="h-2 w-full overflow-hidden rounded-full bg-[#E2E8F0]">
+      <div className={`h-full rounded-full transition-all duration-1000 ease-out ${color}`} style={{ width: `${w}%` }} />
+    </div>
+  )
+}
+
+// ─── Inline Goal Card ─────────────────────────────────────────────────────────
+
+interface GoalCardProps {
+  type: GoalType
+  label: string
+  badge: string
+  accentColor: string
+  barColor: string
+  badgeClass: string
+  title: string
+  amount: number
+  currentAmount: number
+  userId: string
+  onSaved: () => void
+  onToast: (msg: string, type: 'success' | 'error') => void
+}
+
+function GoalCard({
+  type, label, badge, accentColor, barColor, badgeClass,
+  title, amount, currentAmount, onSaved, onToast,
+}: GoalCardProps) {
+  const [editing, setEditing] = useState(false)
+  const [draftTitle, setDraftTitle] = useState(title)
+  const [draftAmount, setDraftAmount] = useState(amount > 0 ? String(amount) : '')
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const isEmpty = !title && amount === 0
+  const percent = pct(currentAmount, amount)
+
+  // Build explicit update objects — no computed keys so TypeScript is happy
+  function savePayload(newTitle: string, newAmount: number) {
+    if (type === '6month') return { goal_6month_title: newTitle, goal_6month_amount: newAmount }
+    if (type === '1year')  return { goal_1year_title:  newTitle, goal_1year_amount:  newAmount }
+    return                        { goal_5year_title:  newTitle, goal_5year_amount:  newAmount }
+  }
+
+  function clearPayload() {
+    if (type === '6month') return { goal_6month_title: '', goal_6month_amount: 0 }
+    if (type === '1year')  return { goal_1year_title:  '', goal_1year_amount:  0 }
+    return                        { goal_5year_title:  '', goal_5year_amount:  0 }
+  }
+
+  function startEdit() {
+    setDraftTitle(title)
+    setDraftAmount(amount > 0 ? String(amount) : '')
+    setEditing(true)
+  }
+
+  function cancelEdit() {
+    setEditing(false)
+    setDraftTitle(title)
+    setDraftAmount(amount > 0 ? String(amount) : '')
+  }
+
+  async function handleSave() {
+    const newTitle = draftTitle.trim()
+    const newAmount = parseFloat(draftAmount) || 0
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { onToast('Not authenticated', 'error'); setSaving(false); return }
+    const { error } = await supabase
+      .from('goals')
+      .update(savePayload(newTitle || label, newAmount))
+      .eq('user_session_id', user.id)
+    setSaving(false)
+    if (error) {
+      onToast(error.message, 'error')
+    } else {
+      setEditing(false)
+      onToast('Goal updated', 'success')
+      onSaved()
+    }
+  }
+
+  async function handleDelete() {
+    setDeleting(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { onToast('Not authenticated', 'error'); setDeleting(false); return }
+    const { error } = await supabase
+      .from('goals')
+      .update(clearPayload())
+      .eq('user_session_id', user.id)
+    setDeleting(false)
+    if (error) {
+      onToast(error.message, 'error')
+    } else {
+      setEditing(false)
+      onToast('Goal cleared', 'success')
+      onSaved()
+    }
+  }
+
+  return (
+    <div className={`rounded-2xl border bg-white shadow-sm overflow-hidden transition-all ${editing ? 'border-emerald-300 ring-2 ring-emerald-500/10' : 'border-[#E2E8F0]'}`}>
+      {/* Accent top bar */}
+      <div className={`h-1 w-full ${barColor}`} />
+
+      <div className="p-5 space-y-4">
+        {/* Header row */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <span className={`inline-block rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${badgeClass}`}>
+              {badge}
+            </span>
+            {!editing && (
+              <h3 className={`font-heading mt-1.5 text-base font-bold truncate ${isEmpty ? 'text-[#CBD5E1] italic' : 'text-[#0F172A]'}`}>
+                {isEmpty ? 'Not set' : title}
+              </h3>
+            )}
+          </div>
+          {!editing && (
+            <button
+              onClick={startEdit}
+              className={`shrink-0 flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition min-h-[36px] ${
+                isEmpty
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                  : 'border-[#E2E8F0] text-[#64748B] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700'
+              }`}
+            >
+              {isEmpty ? (
+                <>
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add
+                </>
+              ) : (
+                <>
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                  Edit
+                </>
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* View mode */}
+        {!editing && (
+          <>
+            {isEmpty ? (
+              <p className="text-sm text-[#94A3B8]">No target set for this time horizon.</p>
+            ) : (
+              <>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-heading text-2xl font-bold text-[#0F172A]">
+                    {fmtUSD(amount)}
+                  </span>
+                  <span className="text-xs text-[#94A3B8]">{label}</span>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs text-[#94A3B8]">
+                    <span>{fmtUSD(currentAmount)} saved</span>
+                    <span className="font-semibold text-emerald-600">{percent}%</span>
+                  </div>
+                  <AnimatedBar percent={percent} color={barColor} />
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* Edit mode */}
+        {editing && (
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-[#64748B]">Goal title</label>
+              <input
+                type="text"
+                autoFocus
+                value={draftTitle}
+                onChange={(e) => setDraftTitle(e.target.value)}
+                placeholder={label}
+                className="w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm text-[#0F172A] placeholder-[#CBD5E1] outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-[#64748B]">Target amount</label>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-emerald-500">$</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={draftAmount}
+                  onChange={(e) => setDraftAmount(e.target.value)}
+                  placeholder="0"
+                  className="w-full rounded-xl border border-[#E2E8F0] py-2.5 pl-7 pr-3 text-sm text-[#0F172A] outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                />
+              </div>
+            </div>
+
+            {/* Action row */}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleSave}
+                disabled={saving || deleting}
+                className="flex-1 rounded-xl bg-emerald-500 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:opacity-60 min-h-[44px]"
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                onClick={cancelEdit}
+                disabled={saving || deleting}
+                className="rounded-xl border border-[#E2E8F0] px-4 py-2.5 text-sm font-medium text-[#64748B] transition hover:bg-[#F8FAFC] disabled:opacity-60 min-h-[44px]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={saving || deleting}
+                title="Clear this goal"
+                className="rounded-xl border border-red-200 px-3 py-2.5 text-sm text-red-500 transition hover:bg-red-50 disabled:opacity-60 min-h-[44px]"
+              >
+                {deleting ? (
+                  <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                ) : (
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -88,17 +296,11 @@ export default function GoalsPage() {
   const router = useRouter()
   const [goals, setGoals] = useState<Goals | null>(null)
   const [progress, setProgress] = useState<Progress>({ '6month': 0, '1year': 0, '5year': 0 })
-  const [chartData, setChartData] = useState<ChartPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
-
-  // Edit form state
-  const [selected, setSelected] = useState<GoalType | null>(null)
-  const [draftTitle, setDraftTitle] = useState('')
-  const [draftAmount, setDraftAmount] = useState('')
-  const [draftDesc, setDraftDesc] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [resetting, setResetting] = useState(false)
 
   useEffect(() => {
     if (!toast) return
@@ -111,15 +313,9 @@ export default function GoalsPage() {
     if (!user) { router.push('/login'); return }
     setUserId(user.id)
 
-    const [goalsRes, progressRes, historyRes] = await Promise.all([
+    const [goalsRes, progressRes] = await Promise.all([
       supabase.from('goals').select('*').eq('user_session_id', user.id).single(),
       supabase.from('goal_progress').select('*').eq('user_session_id', user.id),
-      supabase
-        .from('goal_progress_history')
-        .select('goal_type, current_amount, recorded_at')
-        .eq('user_session_id', user.id)
-        .order('recorded_at', { ascending: true })
-        .limit(60),
     ])
 
     if (goalsRes.data) setGoals(goalsRes.data as Goals)
@@ -129,52 +325,20 @@ export default function GoalsPage() {
       p[row.goal_type as GoalType] = Number(row.current_amount)
     }
     setProgress(p)
-
-    if (historyRes.data?.length) {
-      const byDate: Record<string, ChartPoint> = {}
-      for (const row of historyRes.data) {
-        const date = new Date(row.recorded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-        if (!byDate[date]) byDate[date] = { date, '6month': 0, '1year': 0, '5year': 0 }
-        byDate[date][row.goal_type as GoalType] = Number(row.current_amount)
-      }
-      setChartData(Object.values(byDate))
-    }
-
     setLoading(false)
   }, [router])
 
   useEffect(() => { loadData() }, [loadData])
 
-  function openEdit(slot: GoalSlot) {
-    setSelected(slot.type)
-    setDraftTitle(slot.title)
-    setDraftAmount(String(slot.amount))
-    setDraftDesc(slot.description ?? '')
-  }
-
-  function clearEdit() {
-    setSelected(null)
-    setDraftTitle('')
-    setDraftAmount('')
-    setDraftDesc('')
-  }
-
-  async function handleSave() {
-    if (!userId || !selected) return
-    setSaving(true)
-    const prefix = selected === '6month' ? 'goal_6month' : selected === '1year' ? 'goal_1year' : 'goal_5year'
-    await supabase
-      .from('goals')
-      .update({
-        [`${prefix}_title`]: draftTitle.trim() || 'Untitled',
-        [`${prefix}_amount`]: parseFloat(draftAmount) || 0,
-        [`${prefix}_description`]: draftDesc.trim() || null,
-      })
-      .eq('user_session_id', userId)
-    setSaving(false)
-    clearEdit()
-    setToast({ message: 'Goal saved', type: 'success' })
-    await loadData()
+  async function handleReset() {
+    if (!userId) return
+    setResetting(true)
+    await Promise.all([
+      supabase.from('goal_progress_history').delete().eq('user_session_id', userId),
+      supabase.from('goal_progress').delete().eq('user_session_id', userId),
+    ])
+    await supabase.from('goals').delete().eq('user_session_id', userId)
+    router.push('/dashboard')
   }
 
   // ── Loading ──────────────────────────────────────────────────────────────────
@@ -198,222 +362,118 @@ export default function GoalsPage() {
       <div className="min-h-screen bg-[#F8FAFC]">
         <Navbar />
         <main className="mx-auto max-w-lg px-4 py-16 pb-24 text-center">
-          <p className="text-sm text-[#64748B]">No goals found. Complete onboarding first.</p>
+          <p className="text-sm text-[#64748B]">No goals found.</p>
+          <Link href="/dashboard" className="mt-4 inline-block text-sm font-medium text-emerald-600 hover:text-emerald-700">
+            ← Back to dashboard
+          </Link>
         </main>
       </div>
     )
   }
 
-  const slots: GoalSlot[] = [
-    { type: '6month', label: '6-Month Goal', badge: '6 mo', title: goals.goal_6month_title, amount: goals.goal_6month_amount, description: goals.goal_6month_description },
-    { type: '1year',  label: '1-Year Goal',  badge: '1 yr', title: goals.goal_1year_title,  amount: goals.goal_1year_amount,  description: goals.goal_1year_description },
-    { type: '5year',  label: '5-Year Goal',  badge: '5 yr', title: goals.goal_5year_title,  amount: goals.goal_5year_amount,  description: goals.goal_5year_description },
+  const CARDS: { type: GoalType; label: string; badge: string; accentColor: string; barColor: string; badgeClass: string; title: string; amount: number }[] = [
+    {
+      type: '6month',
+      label: '6-Month Goal',
+      badge: '6 mo',
+      accentColor: 'emerald',
+      barColor: 'bg-emerald-500',
+      badgeClass: 'bg-emerald-50 text-emerald-700',
+      title: goals.goal_6month_title,
+      amount: goals.goal_6month_amount,
+    },
+    {
+      type: '1year',
+      label: '1-Year Goal',
+      badge: '1 yr',
+      accentColor: 'indigo',
+      barColor: 'bg-indigo-500',
+      badgeClass: 'bg-indigo-50 text-indigo-700',
+      title: goals.goal_1year_title,
+      amount: goals.goal_1year_amount,
+    },
+    {
+      type: '5year',
+      label: '5-Year Goal',
+      badge: '5 yr',
+      accentColor: 'amber',
+      barColor: 'bg-amber-400',
+      badgeClass: 'bg-amber-50 text-amber-700',
+      title: goals.goal_5year_title,
+      amount: goals.goal_5year_amount,
+    },
   ]
-
-  const selectedSlot = slots.find(s => s.type === selected)
 
   return (
     <div className="min-h-screen bg-[#F8FAFC]">
       <Navbar />
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
-      <main className="mx-auto max-w-5xl px-4 py-8 pb-24 md:pb-8">
+      <main className="mx-auto max-w-xl px-4 py-8 pb-24 md:pb-8 space-y-4">
 
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="font-heading text-xl font-bold tracking-tight text-[#0F172A]">Your Goals</h1>
-          <p className="mt-1 text-sm text-[#64748B]">Track and edit your financial targets.</p>
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h1 className="font-heading text-xl font-bold tracking-tight text-[#0F172A]">Edit Goals</h1>
+            <p className="mt-0.5 text-sm text-[#64748B]">Update your financial targets.</p>
+          </div>
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#64748B] shadow-sm transition hover:bg-[#F8FAFC]"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            Dashboard
+          </Link>
         </div>
 
-        {/* Two-column layout */}
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
+        {/* Goal cards */}
+        {CARDS.map((card) => (
+          <GoalCard
+            key={card.type}
+            {...card}
+            currentAmount={progress[card.type]}
+            userId={userId!}
+            onSaved={loadData}
+            onToast={(msg, type) => setToast({ message: msg, type })}
+          />
+        ))}
 
-          {/* ── LEFT: Edit form ── */}
-          <div className="lg:col-span-4">
-            <div className="sticky top-20 rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
-              {!selected ? (
-                <div className="flex flex-col items-center justify-center py-8 text-center">
-                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-[#F8FAFC]">
-                    <svg className="h-5 w-5 text-[#CBD5E1]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                  </div>
-                  <p className="text-sm font-medium text-[#94A3B8]">Select a goal to edit</p>
-                  <p className="mt-1 text-xs text-[#CBD5E1]">Click the edit icon on any goal</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="inline-block rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-emerald-600">
-                        {selectedSlot?.badge}
-                      </span>
-                      <p className="mt-1 text-sm font-semibold text-[#0F172A]">{selectedSlot?.label}</p>
-                    </div>
-                    <button onClick={clearEdit} className="rounded-lg p-1.5 text-[#94A3B8] transition hover:bg-[#F8FAFC]">
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-
-                  {/* Floating label: Title */}
-                  <div className="relative">
-                    <input
-                      id="goal-title"
-                      type="text"
-                      value={draftTitle}
-                      onChange={(e) => setDraftTitle(e.target.value)}
-                      placeholder=" "
-                      className="fl-input"
-                    />
-                    <label htmlFor="goal-title" className="fl-label">Goal title</label>
-                  </div>
-
-                  {/* Floating label: Amount */}
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-emerald-500 peer-focus:-translate-y-full">$</span>
-                    <input
-                      id="goal-amount"
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={draftAmount}
-                      onChange={(e) => setDraftAmount(e.target.value)}
-                      placeholder=" "
-                      className="fl-input pl-7 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    />
-                    <label htmlFor="goal-amount" className="fl-label pl-7">Target amount</label>
-                  </div>
-
-                  {/* Floating label: Description */}
-                  <div className="relative">
-                    <input
-                      id="goal-desc"
-                      type="text"
-                      value={draftDesc}
-                      onChange={(e) => setDraftDesc(e.target.value)}
-                      placeholder=" "
-                      className="fl-input"
-                    />
-                    <label htmlFor="goal-desc" className="fl-label">
-                      Notes <span className="font-normal opacity-60">(optional)</span>
-                    </label>
-                  </div>
-
-                  <div className="flex gap-2.5 pt-1">
-                    <button
-                      onClick={clearEdit}
-                      className="flex-1 rounded-xl border border-[#E2E8F0] py-2.5 text-sm font-medium text-[#64748B] transition hover:bg-[#F8FAFC] min-h-[44px]"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleSave}
-                      disabled={saving}
-                      className="flex-1 rounded-xl bg-emerald-500 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 active:scale-[0.98] disabled:opacity-60 min-h-[44px]"
-                    >
-                      {saving ? 'Saving' : 'Save Goal'}
-                    </button>
-                  </div>
-                </div>
-              )}
+        {/* Reset All Goals */}
+        <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm space-y-3">
+          <div>
+            <h3 className="font-heading text-sm font-bold text-[#0F172A]">Reset All Goals</h3>
+            <p className="mt-1 text-xs text-[#94A3B8]">Permanently deletes all goals and progress history. You will be taken back to setup.</p>
+          </div>
+          {!confirmReset ? (
+            <button
+              onClick={() => setConfirmReset(true)}
+              className="rounded-xl border border-red-200 px-4 py-2.5 text-sm font-medium text-red-600 transition hover:bg-red-50 min-h-[44px]"
+            >
+              Reset everything
+            </button>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="w-full text-xs text-red-600 font-medium">Are you sure? This cannot be undone.</p>
+              <button
+                onClick={handleReset}
+                disabled={resetting}
+                className="rounded-xl bg-red-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-60 min-h-[44px]"
+              >
+                {resetting ? 'Deleting…' : 'Yes, delete everything'}
+              </button>
+              <button
+                onClick={() => setConfirmReset(false)}
+                disabled={resetting}
+                className="rounded-xl border border-[#E2E8F0] px-4 py-2.5 text-sm font-medium text-[#64748B] transition hover:bg-[#F8FAFC] min-h-[44px]"
+              >
+                Cancel
+              </button>
             </div>
-          </div>
-
-          {/* ── RIGHT: Goal rows + chart ── */}
-          <div className="lg:col-span-8 space-y-4">
-
-            {/* Goal rows */}
-            {slots.map((slot) => {
-              const current = progress[slot.type]
-              const percent = pct(current, slot.amount)
-              const isEditing = selected === slot.type
-
-              return (
-                <div
-                  key={slot.type}
-                  className={`card-hover rounded-2xl border bg-white p-5 shadow-sm transition-colors ${
-                    isEditing ? 'border-emerald-300 ring-2 ring-emerald-500/10' : 'border-[#E2E8F0]'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="inline-block rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#64748B]">
-                          {slot.badge}
-                        </span>
-                        {percent >= 100 && (
-                          <span className="flex items-center gap-1 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-semibold text-white">
-                            <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                            Done
-                          </span>
-                        )}
-                      </div>
-                      <h3 className="font-heading text-sm font-bold text-[#0F172A]">{slot.title}</h3>
-                      {slot.description && (
-                        <p className="mt-0.5 text-xs text-[#94A3B8]">{slot.description}</p>
-                      )}
-
-                      <div className="mt-3 space-y-1.5">
-                        <div className="flex justify-between text-xs text-[#94A3B8]">
-                          <span>{fmtUSD(current)} saved</span>
-                          <span className="font-semibold text-emerald-600">{percent}%</span>
-                        </div>
-                        <AnimatedBar percent={percent} />
-                        <p className="text-xs text-[#CBD5E1]">of {fmtUSD(slot.amount)} target</p>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => isEditing ? clearEdit() : openEdit(slot)}
-                      className={`shrink-0 rounded-xl p-2.5 transition min-h-[44px] min-w-[44px] flex items-center justify-center ${
-                        isEditing
-                          ? 'bg-emerald-50 text-emerald-600'
-                          : 'text-[#CBD5E1] hover:bg-[#F8FAFC] hover:text-emerald-600'
-                      }`}
-                      aria-label="Edit goal"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-
-            {/* Progress chart */}
-            {chartData.length >= 2 ? (
-              <div className="card-hover rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
-                <h2 className="font-heading mb-4 text-sm font-bold text-[#0F172A]">Progress Over Time</h2>
-                <ResponsiveContainer width="100%" height={200}>
-                  <LineChart data={chartData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94A3B8' }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: '#94A3B8' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: '12px', border: '1px solid #E2E8F0', fontSize: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      formatter={(value: any, name: any) => [fmtUSD(Number(value)), CHART_LABEL[String(name) as GoalType] ?? String(name)]}
-                    />
-                    <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} formatter={(name) => CHART_LABEL[name as GoalType] ?? name} />
-                    <Line type="monotone" dataKey="6month" stroke="#10B981" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="1year"  stroke="#6366F1" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="5year"  stroke="#F59E0B" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm text-center">
-                <p className="text-sm font-medium text-[#64748B]">Progress chart</p>
-                <p className="mt-1 text-xs text-[#94A3B8]">Update your balance at least twice to see a chart here.</p>
-              </div>
-            )}
-          </div>
+          )}
         </div>
+
       </main>
     </div>
   )

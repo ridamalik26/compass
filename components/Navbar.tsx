@@ -37,28 +37,11 @@ const NAV = [
   },
 ]
 
-function getInitials(name: string): string {
-  const parts = name.split(/[\s@]/).filter(Boolean)
-  return parts.length >= 2
-    ? (parts[0][0] + parts[1][0]).toUpperCase()
-    : (name[0] ?? '?').toUpperCase()
-}
-
 export default function Navbar() {
   const pathname = usePathname()
   const router = useRouter()
-  const [initials, setInitials] = useState('?')
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) return
-      const { data } = await supabase.from('users').select('full_name').eq('id', user.id).single()
-      const name = data?.full_name || user.email || ''
-      setInitials(getInitials(name))
-    })
-  }, [])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -119,9 +102,11 @@ export default function Navbar() {
           <div className="relative flex shrink-0 items-center" ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen((v) => !v)}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white ring-2 ring-emerald-100 transition hover:ring-emerald-200"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 ring-2 ring-emerald-100 transition hover:ring-emerald-200"
             >
-              {initials}
+              <svg className="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z" />
+              </svg>
             </button>
 
             {dropdownOpen && (

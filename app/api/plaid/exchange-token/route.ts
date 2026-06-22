@@ -1,5 +1,5 @@
 import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid'
-import { supabase } from '@/lib/supabase'
+import { createServerClient, getAuthUser } from '@/lib/supabase-server'
 
 const configuration = new Configuration({
   basePath: PlaidEnvironments[process.env.PLAID_ENV as keyof typeof PlaidEnvironments ?? 'sandbox'],
@@ -14,8 +14,11 @@ const configuration = new Configuration({
 const plaidClient = new PlaidApi(configuration)
 
 export async function POST(request: Request) {
+  const { user, error: authError } = await getAuthUser(request)
+  if (!user) return Response.json({ error: authError }, { status: 401 })
+
   try {
-    const { publicToken, userSessionId } = await request.json()
+    const { publicToken } = await request.json()
 
     const exchangeResponse = await plaidClient.itemPublicTokenExchange({
       public_token: publicToken,
@@ -23,14 +26,13 @@ export async function POST(request: Request) {
 
     const { access_token, item_id } = exchangeResponse.data
 
+    const supabase = createServerClient(request.headers.get('Authorization'))
     const { error } = await supabase.from('plaid_tokens').upsert(
-      { user_session_id: userSessionId, access_token, item_id },
+      { user_session_id: user.id, access_token, item_id },
       { onConflict: 'user_session_id' },
     )
 
-    if (error) {
-      return Response.json({ error: error.message }, { status: 500 })
-    }
+    if (error) return Response.json({ error: error.message }, { status: 500 })
 
     return Response.json({ success: true })
   } catch (err) {
