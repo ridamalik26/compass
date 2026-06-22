@@ -1,26 +1,52 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ── Floating label inputs ───────────────────────────────────────────────── */
+.fl-input {
+  @apply w-full rounded-xl border border-[#E2E8F0] bg-white px-4 pb-2 pt-6 text-sm text-[#0F172A] outline-none transition-all;
+}
+.fl-input:focus {
+  @apply border-emerald-500 ring-2 ring-emerald-500/10;
+}
+.fl-label {
+  pointer-events: none;
+  @apply absolute left-4 top-4 text-sm text-[#94A3B8] transition-all;
+}
+.fl-input:focus ~ .fl-label,
+.fl-input:not(:placeholder-shown) ~ .fl-label {
+  @apply top-2 text-xs text-emerald-600;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ── Skeleton shimmer ────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #E2E8F0 25%, #F1F5F9 50%, #E2E8F0 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s ease infinite;
+  border-radius: 0.5rem;
+}
+
+/* ── Toast slide-in ──────────────────────────────────────────────────────── */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(1rem); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.toast-enter {
+  animation: toast-in 0.25s ease forwards;
+}
+
+/* ── Hover card lift ─────────────────────────────────────────────────────── */
+.card-hover {
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.card-hover:hover {
+  box-shadow: 0 4px 24px -4px rgba(15, 23, 42, 0.10);
+  transform: translateY(-1px);
 }
