@@ -1,32 +1,59 @@
 # Compass — AI Financial Co-pilot
 
-A full-stack money goals tracker with AI-powered recommendations.
+Live app: https://compass-phi-one.vercel.app
+
+## Overview
+
+Compass is an AI-powered financial goals tracker that helps users set, track, and hit their money goals faster. Users set 6-month, 1-year, and 5-year savings targets. The app tracks progress in real time, pulls bank transactions via Plaid, and delivers personalized AI coaching via Claude API.
+
+## Screenshots
+
+### Login
+![Login](public/screenshots/login.png)
+
+### Dashboard
+![Dashboard](public/screenshots/dashboard1.png)
+
+### AI Recommendations
+![AI Recommendations](public/screenshots/ai_recommendation.png)
+
+### Edit Goals
+![Edit Goals](public/screenshots/edit_goals.png)
+
+### Connect Bank via Plaid
+![Plaid](public/screenshots/plaid.png)
+
+### Reset Goals
+![Reset](public/screenshots/reset.png)
+
+### Sign Out
+![Sign Out](public/screenshots/signout.png)
 
 ## Features
-- Goal onboarding (6-month, 1-year, 5-year goals)
-- Live dashboard with progress tracking
-- AI recommendations powered by Claude API
-- Plaid sandbox bank integration
-- Supabase backend with auth
+
+- Goal setup: set up to 3 savings goals (6-month, 1-year, 5-year) with target amounts
+- Live dashboard: real-time progress tracking per goal with pace indicators (Ahead, On Track, Behind)
+- AI coach: Claude-powered recommendations tailored to your actual savings pace
+- Plaid sandbox integration: auto-pull income and spending to update goal progress
+- Edit and reset goals at any time
+- Secure authentication via Supabase
 
 ## Tech Stack
+
 - Next.js 16 (App Router) + TypeScript
 - Tailwind CSS
 - Supabase (Postgres + Auth)
 - Anthropic Claude API
-- Plaid SDK
+- Plaid SDK (sandbox)
+- Vercel
 
-## Setup
+## Local Setup
+
 1. Clone the repo
-2. Copy .env.local.example to .env.local and fill in keys
-3. Run SQL migrations in /supabase/migrations/
-4. npm install
-5. npm run dev
+2. Run `npm install`
+3. Copy `.env.local.example` to `.env.local` and fill in your keys
+4. Run SQL migrations in `/supabase/migrations/` via Supabase SQL Editor
+5. Run `npm run dev`
+6. Open `http://localhost:3000`
 
 ## Environment Variables
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-ANTHROPIC_API_KEY=
-PLAID_CLIENT_ID=
-PLAID_SECRET=
-PLAID_ENV=sandbox

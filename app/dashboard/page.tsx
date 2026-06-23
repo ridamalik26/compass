@@ -629,13 +629,15 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ── Goal cards ── */}
-        <section className="space-y-3">
-          <h2 className="font-heading text-sm font-bold text-[#0F172A]">Your Goals</h2>
-          <GoalCard type="6month" badge="6 mo" title={goals.goal_6month_title} description={goals.goal_6month_description} targetAmount={goals.goal_6month_amount} currentAmount={progress['6month']} daysTotal={DAYS_TOTAL['6month']} createdAt={goals.created_at} onSave={saveProgress} />
-          <GoalCard type="1year"  badge="1 yr"  title={goals.goal_1year_title}  description={goals.goal_1year_description}  targetAmount={goals.goal_1year_amount}  currentAmount={progress['1year']}  daysTotal={DAYS_TOTAL['1year']}  createdAt={goals.created_at} onSave={saveProgress} />
-          <GoalCard type="5year"  badge="5 yr"  title={goals.goal_5year_title}  description={goals.goal_5year_description}  targetAmount={goals.goal_5year_amount}  currentAmount={progress['5year']}  daysTotal={DAYS_TOTAL['5year']}  createdAt={goals.created_at} onSave={saveProgress} />
-        </section>
+        {/* ── Goal cards (active goals only) ── */}
+        {anyActiveGoal && (
+          <section className="space-y-3">
+            <h2 className="font-heading text-sm font-bold text-[#0F172A]">Your Goals</h2>
+            {active6month && <GoalCard type="6month" badge="6 mo" title={goals.goal_6month_title} description={goals.goal_6month_description} targetAmount={goals.goal_6month_amount} currentAmount={progress['6month']} daysTotal={DAYS_TOTAL['6month']} createdAt={goals.created_at} onSave={saveProgress} />}
+            {active1year  && <GoalCard type="1year"  badge="1 yr"  title={goals.goal_1year_title}  description={goals.goal_1year_description}  targetAmount={goals.goal_1year_amount}  currentAmount={progress['1year']}  daysTotal={DAYS_TOTAL['1year']}  createdAt={goals.created_at} onSave={saveProgress} />}
+            {active5year  && <GoalCard type="5year"  badge="5 yr"  title={goals.goal_5year_title}  description={goals.goal_5year_description}  targetAmount={goals.goal_5year_amount}  currentAmount={progress['5year']}  daysTotal={DAYS_TOTAL['5year']}  createdAt={goals.created_at} onSave={saveProgress} />}
+          </section>
+        )}
 
         {/* ── AI Coach (only when at least one active goal exists) ── */}
         {anyActiveGoal && (

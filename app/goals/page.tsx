@@ -73,7 +73,7 @@ interface GoalCardProps {
 }
 
 function GoalCard({
-  type, label, badge, accentColor, barColor, badgeClass,
+  type, label, badge, barColor, badgeClass,
   title, amount, currentAmount, onSaved, onToast,
 }: GoalCardProps) {
   const [editing, setEditing] = useState(false)
@@ -428,8 +428,8 @@ export default function GoalsPage() {
           </Link>
         </div>
 
-        {/* Goal cards */}
-        {CARDS.map((card) => (
+        {/* Goal cards — only show active goals */}
+        {CARDS.filter(c => c.amount > 0 && c.title.trim().length > 0).map((card) => (
           <GoalCard
             key={card.type}
             {...card}
@@ -439,6 +439,19 @@ export default function GoalsPage() {
             onToast={(msg, type) => setToast({ message: msg, type })}
           />
         ))}
+
+        {/* All goals cleared — prompt to start fresh */}
+        {CARDS.every(c => !(c.amount > 0 && c.title.trim().length > 0)) && (
+          <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm text-center space-y-3">
+            <p className="text-sm text-[#64748B]">All goals have been cleared.</p>
+            <Link href="/dashboard" className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 hover:text-emerald-700">
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              Set up new goals on dashboard
+            </Link>
+          </div>
+        )}
 
         {/* Reset All Goals */}
         <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm space-y-3">
