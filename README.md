@@ -9,25 +9,25 @@ Compass is an AI-powered financial goals tracker that helps users set, track, an
 ## Screenshots
 
 ### Login
-![Login](public/screenshots/login.png)
+![Login](assests/login.png)
 
 ### Dashboard
-![Dashboard](public/screenshots/dashboard1.png)
+![Dashboard](assests/dashboard1.png)
 
 ### AI Recommendations
-![AI Recommendations](public/screenshots/ai_recommendation.png)
+![AI Recommendations](assests/ai_recommendation.png)
 
 ### Edit Goals
-![Edit Goals](public/screenshots/edit_goals.png)
+![Edit Goals](assests/edit_goals.png)
 
 ### Connect Bank via Plaid
-![Plaid](public/screenshots/plaid.png)
+![Plaid](assests/plaid.png)
 
 ### Reset Goals
-![Reset](public/screenshots/reset.png)
+![Reset](assests/reset.png)
 
 ### Sign Out
-![Sign Out](public/screenshots/signout.png)
+![Sign Out](assests/signout.png)
 
 ## Features
 
