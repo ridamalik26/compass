@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import Navbar from '@/components/Navbar'
 import Toast from '@/components/Toast'
 import type { User } from '@supabase/supabase-js'
+import { evaluateBalanceChange, formatMoney, type BalanceMode } from '@/lib/balance'
 import { GOAL_DAYS, getStatus, daysLeft, type GoalType, type StatusLabel } from '@/lib/pace'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -296,7 +297,37 @@ interface GoalCardProps {
 function GoalCard({ type, badge, title, description, targetAmount, currentAmount, daysTotal, createdAt, onSave }: GoalCardProps) {
   const [isUpdating, setIsUpdating] = useState(false)
   const [updateValue, setUpdateValue] = useState('')
+  const [mode, setMode] = useState<BalanceMode>('add')
+  const [submitted, setSubmitted] = useState(false)
   const [saving, setSaving] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!isUpdating) return
+    const el = inputRef.current
+    if (!el) return
+    el.focus()
+    if (mode === 'set') el.select()
+  }, [isUpdating, mode])
+
+  function startEdit() {
+    setMode('add')
+    setUpdateValue('')
+    setSubmitted(false)
+    setIsUpdating(true)
+  }
+
+  function changeMode(next: BalanceMode) {
+    setMode(next)
+    setUpdateValue(next === 'set' ? String(currentAmount) : '')
+    setSubmitted(false)
+  }
+
+  function closeEdit() {
+    setIsUpdating(false)
+    setUpdateValue('')
+    setSubmitted(false)
+  }
 
   const status = getStatus(targetAmount, currentAmount, daysTotal, createdAt)
   const pct = progressPercent(currentAmount, targetAmount)
@@ -309,12 +340,25 @@ function GoalCard({ type, badge, title, description, targetAmount, currentAmount
     Behind: 'bg-red-500',
   }
 
-  async function handleSave() {
+  const result = evaluateBalanceChange(mode, updateValue, currentAmount)
+  const showFeedback = submitted || updateValue.trim() !== ''
+
+  const MODES: { value: BalanceMode; label: string; placeholder: string }[] = [
+    { value: 'add', label: 'Add money', placeholder: 'Amount to add' },
+    { value: 'withdraw', label: 'Withdraw', placeholder: 'Amount to withdraw' },
+    { value: 'set', label: 'Set balance', placeholder: 'New balance' },
+  ]
+
+  async function handleSave(e?: { preventDefault(): void }) {
+    e?.preventDefault()
+    if (!result.ok) {
+      setSubmitted(true)
+      return
+    }
     setSaving(true)
-    await onSave(type, parseFloat(updateValue) || 0)
+    await onSave(type, result.newBalance)
     setSaving(false)
-    setIsUpdating(false)
-    setUpdateValue('')
+    closeEdit()
   }
 
   return (
@@ -357,7 +401,7 @@ function GoalCard({ type, badge, title, description, targetAmount, currentAmount
         <span className="text-xs text-[#94A3B8]">{fmtUSD(currentAmount)} of {fmtUSD(targetAmount)}</span>
         {!isUpdating && (
           <button
-            onClick={() => { setIsUpdating(true); setUpdateValue(String(currentAmount)) }}
+            onClick={startEdit}
             className="text-xs font-medium text-[#64748B] transition hover:text-emerald-600"
           >
             Update Balance
@@ -367,33 +411,66 @@ function GoalCard({ type, badge, title, description, targetAmount, currentAmount
 
       {/* Inline update form */}
       {isUpdating && (
-        <div className="flex items-center gap-2 border-t border-[#F1F5F9] pt-4">
-          <div className="relative flex-1">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-emerald-500">$</span>
-            <input
-              type="number"
-              min="0"
-              step="any"
-              autoFocus
-              value={updateValue}
-              onChange={(e) => setUpdateValue(e.target.value)}
-              className="w-full rounded-xl border border-[#E2E8F0] py-2.5 pl-7 pr-3 text-sm text-[#0F172A] outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            />
+        <form onSubmit={handleSave} noValidate className="space-y-3 border-t border-[#F1F5F9] pt-4">
+          <div role="radiogroup" aria-label="Balance update type" className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
+            {MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                role="radio"
+                aria-checked={mode === m.value}
+                onClick={() => changeMode(m.value)}
+                className={`min-h-[40px] rounded-lg px-2 text-xs font-semibold transition ${
+                  mode === m.value ? 'bg-white text-emerald-700 shadow-sm' : 'text-[#64748B] hover:text-[#0F172A]'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
           </div>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:opacity-60 min-h-[44px]"
-          >
-            {saving ? 'Saving' : 'Save'}
-          </button>
-          <button
-            onClick={() => { setIsUpdating(false); setUpdateValue('') }}
-            className="rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-medium text-[#64748B] transition hover:bg-[#F8FAFC] min-h-[44px]"
-          >
-            Cancel
-          </button>
-        </div>
+
+          <div className="flex items-start gap-2">
+            <div className="relative flex-1">
+              <span className="pointer-events-none absolute left-3 top-[22px] -translate-y-1/2 text-sm font-semibold text-emerald-500">$</span>
+              <input
+                ref={inputRef}
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                aria-label={MODES.find((m) => m.value === mode)?.placeholder}
+                aria-invalid={showFeedback && !result.ok}
+                placeholder={MODES.find((m) => m.value === mode)?.placeholder}
+                value={updateValue}
+                onFocus={(e) => { if (mode === 'set') e.currentTarget.select() }}
+                onChange={(e) => setUpdateValue(e.target.value)}
+                className="min-h-[44px] w-full rounded-xl border border-[#E2E8F0] py-2.5 pl-7 pr-3 text-sm text-[#0F172A] outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10"
+              />
+              {showFeedback && !result.ok && (
+                <p role="alert" className="mt-1.5 text-xs text-red-600">{result.message}</p>
+              )}
+              {showFeedback && result.ok && (
+                <p className="mt-1.5 text-xs font-medium text-emerald-600">New balance: {formatMoney(result.newBalance)}</p>
+              )}
+              {!showFeedback && (
+                <p className="mt-1.5 text-xs text-[#94A3B8]">Current balance: {formatMoney(currentAmount)}</p>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:opacity-60 min-h-[44px]"
+            >
+              {saving ? 'Saving' : 'Save'}
+            </button>
+            <button
+              type="button"
+              onClick={closeEdit}
+              className="rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-medium text-[#64748B] transition hover:bg-[#F8FAFC] min-h-[44px]"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       )}
     </div>
   )
