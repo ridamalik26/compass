@@ -328,7 +328,11 @@ export default function GoalsPage() {
     setLoading(false)
   }, [router])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => {
+    // Deferred one tick so the initial fetch is not a synchronous setState inside the effect body.
+    const id = setTimeout(loadData, 0)
+    return () => clearTimeout(id)
+  }, [loadData])
 
   async function handleReset() {
     if (!userId) return

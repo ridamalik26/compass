@@ -514,7 +514,11 @@ export default function DashboardPage() {
     }
   }, [router, fetchRecommendations])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => {
+    // Deferred one tick so the initial fetch is not a synchronous setState inside the effect body.
+    const id = setTimeout(loadData, 0)
+    return () => clearTimeout(id)
+  }, [loadData])
 
   async function saveProgress(type: GoalType, amount: number) {
     if (!user) return
