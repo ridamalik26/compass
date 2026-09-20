@@ -26,9 +26,12 @@ export async function POST(request: Request) {
       .from('plaid_tokens')
       .select('access_token')
       .eq('user_session_id', user.id)
-      .single()
+      .maybeSingle()
 
-    if (tokenRow.error || !tokenRow.data) {
+    if (tokenRow.error) {
+      return Response.json({ error: 'Could not load your linked bank account.' }, { status: 500 })
+    }
+    if (!tokenRow.data) {
       return Response.json({ error: 'No linked bank account found.' }, { status: 400 })
     }
 
@@ -44,7 +47,7 @@ export async function POST(request: Request) {
     const transactions = txRes.data.transactions
 
     if (transactions.length > 0) {
-      await supabase.from('transactions').upsert(
+      const { error: txError } = await supabase.from('transactions').upsert(
         transactions.map((tx) => ({
           user_session_id: user.id,
           transaction_id: tx.transaction_id,
@@ -53,8 +56,11 @@ export async function POST(request: Request) {
           description: tx.merchant_name ?? tx.original_description ?? null,
           category: tx.personal_finance_category?.primary ?? null,
         })),
-        { onConflict: 'transaction_id' },
+        { onConflict: 'user_session_id,transaction_id' },
       )
+      if (txError) {
+        return Response.json({ error: `Failed to save transactions: ${txError.message}` }, { status: 500 })
+      }
     }
 
     // Plaid: positive amount = debit (money out), negative = credit (money in)
@@ -69,6 +75,10 @@ export async function POST(request: Request) {
       .select('*')
       .eq('user_session_id', user.id)
 
+    if (progressRes.error) {
+      return Response.json({ error: `Failed to load goal progress: ${progressRes.error.message}` }, { status: 500 })
+    }
+
     const currentProgress: Record<string, number> = {}
     for (const row of progressRes.data ?? []) {
       currentProgress[row.goal_type] = Number(row.current_amount)
@@ -77,7 +87,7 @@ export async function POST(request: Request) {
     const share = netSavings / 3
     const types = ['6month', '1year', '5year']
 
-    await Promise.all(
+    const upserts = await Promise.all(
       types.map((t) =>
         supabase.from('goal_progress').upsert(
           {
@@ -90,6 +100,11 @@ export async function POST(request: Request) {
         ),
       ),
     )
+
+    const failed = upserts.find((r) => r.error)
+    if (failed?.error) {
+      return Response.json({ error: `Failed to update goal progress: ${failed.error.message}` }, { status: 500 })
+    }
 
     return Response.json({ synced: transactions.length, netSavings: Math.round(netSavings), updated: true })
   } catch (err) {
