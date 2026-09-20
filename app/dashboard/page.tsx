@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase'
 import Navbar from '@/components/Navbar'
 import Toast from '@/components/Toast'
 import type { User } from '@supabase/supabase-js'
+import { GOAL_DAYS, getStatus, daysLeft, type GoalType, type StatusLabel } from '@/lib/pace'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,12 +32,9 @@ interface Progress {
   '5year': number
 }
 
-type GoalType = '6month' | '1year' | '5year'
-type StatusLabel = 'Ahead' | 'On Track' | 'Behind'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const DAYS_TOTAL: Record<GoalType, number> = { '6month': 180, '1year': 365, '5year': 1825 }
 
 function getGreeting(): string {
   const h = new Date().getHours()
@@ -45,23 +43,8 @@ function getGreeting(): string {
   return 'Good evening'
 }
 
-function getStatus(targetAmount: number, currentAmount: number, daysTotal: number, createdAt: string): StatusLabel {
-  const daysSince = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000))
-  const timeElapsed = Math.min(daysSince / daysTotal, 1)
-  const expectedAmount = timeElapsed * targetAmount
-  const buffer = targetAmount * 0.05
-  if (currentAmount >= expectedAmount + buffer) return 'Ahead'
-  if (currentAmount <= expectedAmount - buffer) return 'Behind'
-  return 'On Track'
-}
-
 function progressPercent(current: number, target: number) {
   return target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0
-}
-
-function daysLeft(daysTotal: number, createdAt: string) {
-  const daysSince = Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000)
-  return Math.max(0, daysTotal - daysSince)
 }
 
 function fmtUSD(n: number) {
@@ -646,9 +629,9 @@ export default function DashboardPage() {
         {anyActiveGoal && (
           <section className="space-y-3">
             <h2 className="font-heading text-sm font-bold text-[#0F172A]">Your Goals</h2>
-            {active6month && <GoalCard type="6month" badge="6 mo" title={goals.goal_6month_title} description={goals.goal_6month_description} targetAmount={goals.goal_6month_amount} currentAmount={progress['6month']} daysTotal={DAYS_TOTAL['6month']} createdAt={goals.created_at} onSave={saveProgress} />}
-            {active1year  && <GoalCard type="1year"  badge="1 yr"  title={goals.goal_1year_title}  description={goals.goal_1year_description}  targetAmount={goals.goal_1year_amount}  currentAmount={progress['1year']}  daysTotal={DAYS_TOTAL['1year']}  createdAt={goals.created_at} onSave={saveProgress} />}
-            {active5year  && <GoalCard type="5year"  badge="5 yr"  title={goals.goal_5year_title}  description={goals.goal_5year_description}  targetAmount={goals.goal_5year_amount}  currentAmount={progress['5year']}  daysTotal={DAYS_TOTAL['5year']}  createdAt={goals.created_at} onSave={saveProgress} />}
+            {active6month && <GoalCard type="6month" badge="6 mo" title={goals.goal_6month_title} description={goals.goal_6month_description} targetAmount={goals.goal_6month_amount} currentAmount={progress['6month']} daysTotal={GOAL_DAYS['6month']} createdAt={goals.created_at} onSave={saveProgress} />}
+            {active1year  && <GoalCard type="1year"  badge="1 yr"  title={goals.goal_1year_title}  description={goals.goal_1year_description}  targetAmount={goals.goal_1year_amount}  currentAmount={progress['1year']}  daysTotal={GOAL_DAYS['1year']}  createdAt={goals.created_at} onSave={saveProgress} />}
+            {active5year  && <GoalCard type="5year"  badge="5 yr"  title={goals.goal_5year_title}  description={goals.goal_5year_description}  targetAmount={goals.goal_5year_amount}  currentAmount={progress['5year']}  daysTotal={GOAL_DAYS['5year']}  createdAt={goals.created_at} onSave={saveProgress} />}
           </section>
         )}
 

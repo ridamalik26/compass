@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { getAuthUser } from '@/lib/supabase-server'
+import { paceDetails } from '@/lib/pace'
 
 interface GoalInput {
   type: string
@@ -37,16 +38,12 @@ export async function POST(request: Request) {
     const client = new Anthropic({ apiKey })
 
     const lines = goals.map((g) => {
-      const daysSince = Math.max(
-        0,
-        Math.floor((Date.now() - new Date(g.createdAt).getTime()) / 86_400_000),
+      const { daysLeft, shortfall, surplus, percent: pct } = paceDetails(
+        g.targetAmount,
+        g.currentAmount,
+        g.daysTotal,
+        g.createdAt,
       )
-      const timeElapsed = Math.min(daysSince / g.daysTotal, 1)
-      const expectedAmount = timeElapsed * g.targetAmount
-      const shortfall = expectedAmount - g.currentAmount
-      const surplus = g.currentAmount - expectedAmount
-      const pct = g.targetAmount > 0 ? Math.round((g.currentAmount / g.targetAmount) * 100) : 0
-      const daysLeft = Math.max(0, g.daysTotal - daysSince)
 
       let analysis: string
       if (g.status === 'Behind') {
