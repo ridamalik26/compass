@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { getAuthUser } from '@/lib/supabase-server'
 
 interface GoalInput {
   type: string
@@ -11,6 +12,9 @@ interface GoalInput {
 }
 
 export async function POST(request: Request) {
+  const { user, error: authError } = await getAuthUser(request)
+  if (!user) return Response.json({ error: authError }, { status: 401 })
+
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim()
   if (!apiKey) {
     console.error('[recommendations] ANTHROPIC_API_KEY is not set')
@@ -21,8 +25,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json()
     goals = body.goals
-    console.log('[recommendations] received goals:', JSON.stringify(goals, null, 2))
-  } catch (err) {
+  } catch {
     return Response.json({ error: 'Invalid request body.' }, { status: 400 })
   }
 
@@ -63,19 +66,13 @@ ${lines.join('\n')}
 
 Give 2–4 short, specific, actionable tips to help them stay on track or catch up. Be direct and encouraging. Use plain text only — no markdown, no bullet points, no headers.`
 
-    console.log('[recommendations] calling Claude with prompt:', prompt)
-
     const message = await client.messages.create({
       model: 'claude-haiku-4-5',
       max_tokens: 400,
       messages: [{ role: 'user', content: prompt }],
     })
 
-    console.log('[recommendations] Claude response stop_reason:', message.stop_reason)
-
     const text = message.content[0]?.type === 'text' ? message.content[0].text : ''
-    console.log('[recommendations] text length:', text.length)
-
     return Response.json({ recommendation: text })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
