@@ -478,9 +478,11 @@ export default function DashboardPage() {
     ])
 
     const rawName =
-      (profileRes.data?.full_name as string | null) ??
-      (authUser.user_metadata?.name as string | undefined) ??
-      authUser.email ?? 'there'
+      (profileRes.data?.full_name as string | null) ||
+      (authUser.user_metadata?.name as string | undefined) ||
+      (authUser.user_metadata?.full_name as string | undefined) ||
+      authUser.email?.split('@')[0] ||
+      'there'
     setUserName(rawName.split(' ')[0])
 
     const p: Progress = { '6month': 0, '1year': 0, '5year': 0 }

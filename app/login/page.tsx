@@ -27,23 +27,12 @@ function LoginForm() {
     setStatus('loading')
     setErrorMsg('')
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
       setStatus('error')
       setErrorMsg(error.message)
       return
-    }
-
-    if (data.user) {
-      await supabase.from('users').upsert(
-        {
-          id: data.user.id,
-          full_name: (data.user.user_metadata?.name as string | undefined) ?? null,
-          email: data.user.email,
-        },
-        { onConflict: 'id' },
-      )
     }
 
     router.push('/dashboard')
