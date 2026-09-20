@@ -2,9 +2,9 @@
 // and never expose SUPABASE_SERVICE_ROLE_KEY via a NEXT_PUBLIC_ variable.
 // Use it only for plaid_tokens, only after getAuthUser has verified the user,
 // and always filter by the verified user.id.
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-let adminClient: ReturnType<typeof createClient> | null = null
+let adminClient: SupabaseClient | null = null
 
 export function getSupabaseAdmin() {
   if (adminClient) return adminClient
