@@ -107,6 +107,12 @@ function LoginForm() {
               </Link>
             </div>
 
+            {searchParams.get('expired') === '1' && status !== 'error' && (
+              <div role="status" className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                Your session expired, please log in again.
+              </div>
+            )}
+
             {searchParams.get('reset') === '1' && status !== 'error' && (
               <div role="status" className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
                 Password updated. Please sign in with your new password.

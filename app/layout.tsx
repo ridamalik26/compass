@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter, Sora } from 'next/font/google'
 import './globals.css'
+import AuthWatcher from '@/components/AuthWatcher'
 
 const inter = Inter({
   subsets: ['latin'],
@@ -23,7 +24,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${sora.variable} h-full antialiased`}>
-      <body className="min-h-full bg-[#F8FAFC] text-[#0F172A]">{children}</body>
+      <body className="min-h-full bg-[#F8FAFC] text-[#0F172A]">
+        <AuthWatcher />
+        {children}
+      </body>
     </html>
   )
 }

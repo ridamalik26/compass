@@ -15,16 +15,20 @@ export default function ConnectBankPage() {
   const [linkToken, setLinkToken] = useState<string | null>(null)
   const [status, setStatus] = useState<'idle' | 'linking' | 'syncing' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
-  const [accessToken, setAccessToken] = useState<string | null>(null)
+
+  // A 401 or a missing session means the login is no longer valid: clear it and explain why.
+  const handleExpired = useCallback(async () => {
+    await supabase.auth.signOut({ scope: 'local' })
+    router.replace('/login?expired=1')
+  }, [router])
 
   useEffect(() => {
     async function init() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/login'); return }
-
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { router.push('/login'); return }
-      setAccessToken(session.access_token)
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { await handleExpired(); return }
 
       try {
         const r = await fetch('/api/plaid/create-link-token', {
@@ -35,6 +39,7 @@ export default function ConnectBankPage() {
           },
           body: JSON.stringify({}),
         })
+        if (r.status === 401) { await handleExpired(); return }
         const data = await r.json()
         if (data.link_token) setLinkToken(data.link_token)
         else setMessage(data.error ?? 'Failed to initialize.')
@@ -43,19 +48,25 @@ export default function ConnectBankPage() {
       }
     }
     init()
-  }, [router])
+  }, [router, handleExpired])
 
   const onSuccess = useCallback(
     async (publicToken: string) => {
       setStatus('linking')
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
+      // Read the session now instead of caching a token that may have expired while the page was open.
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) { await handleExpired(); return }
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      }
       try {
         const exchangeRes = await fetch('/api/plaid/exchange-token', {
           method: 'POST',
           headers,
           body: JSON.stringify({ publicToken }),
         })
+        if (exchangeRes.status === 401) { await handleExpired(); return }
         const exchangeData = await exchangeRes.json()
         if (!exchangeData.success) {
           setStatus('error')
@@ -69,6 +80,7 @@ export default function ConnectBankPage() {
           headers,
           body: JSON.stringify({}),
         })
+        if (syncRes.status === 401) { await handleExpired(); return }
         const syncData = await syncRes.json()
         if (syncData.error) { setStatus('error'); setMessage(syncData.error); return }
 
@@ -83,7 +95,7 @@ export default function ConnectBankPage() {
         setMessage('An unexpected error occurred.')
       }
     },
-    [accessToken],
+    [handleExpired],
   )
 
   const { open, ready } = usePlaidLink({ token: linkToken, onSuccess, onExit: () => setStatus('idle') })
