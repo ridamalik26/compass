@@ -8,6 +8,7 @@ import Navbar from '@/components/Navbar'
 import Toast from '@/components/Toast'
 import type { User } from '@supabase/supabase-js'
 import { evaluateBalanceChange, formatMoney, type BalanceMode } from '@/lib/balance'
+import { totalSaved as computeTotalSaved, weeklyChange, type HistorySnapshot } from '@/lib/savings'
 import { GOAL_DAYS, getStatus, daysLeft, type GoalType, type StatusLabel } from '@/lib/pace'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -36,6 +37,15 @@ interface Progress {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+
+// A goal counts only when it has a real title and target (cleared goals do not).
+function activeGoalTypes(g: Goals): GoalType[] {
+  const types: GoalType[] = []
+  if (g.goal_6month_amount > 0 && g.goal_6month_title.trim().length > 0) types.push('6month')
+  if (g.goal_1year_amount > 0 && g.goal_1year_title.trim().length > 0) types.push('1year')
+  if (g.goal_5year_amount > 0 && g.goal_5year_title.trim().length > 0) types.push('5year')
+  return types
+}
 
 function getGreeting(): string {
   const h = new Date().getHours()
@@ -540,18 +550,25 @@ export default function DashboardPage() {
     if (!authUser) { router.push('/login'); return }
     setUser(authUser)
 
-    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString()
+    const cutoffIso = new Date(Date.now() - 7 * 86_400_000).toISOString()
 
-    const [goalsRes, progressRes, profileRes, historyRes] = await Promise.all([
-      supabase.from('goals').select('*').eq('user_session_id', authUser.id).single(),
-      supabase.from('goal_progress').select('*').eq('user_session_id', authUser.id),
-      supabase.from('users').select('full_name').eq('id', authUser.id).single(),
+    // For each goal, its last snapshot at or before 7 days ago (the balance a week ago).
+    const historyQueries = (['6month', '1year', '5year'] as GoalType[]).map((t) =>
       supabase
         .from('goal_progress_history')
         .select('goal_type, current_amount, recorded_at')
         .eq('user_session_id', authUser.id)
-        .gte('recorded_at', sevenDaysAgo)
-        .order('recorded_at', { ascending: true }),
+        .eq('goal_type', t)
+        .lte('recorded_at', cutoffIso)
+        .order('recorded_at', { ascending: false })
+        .limit(1),
+    )
+
+    const [goalsRes, progressRes, profileRes, historyResults] = await Promise.all([
+      supabase.from('goals').select('*').eq('user_session_id', authUser.id).single(),
+      supabase.from('goal_progress').select('*').eq('user_session_id', authUser.id),
+      supabase.from('users').select('full_name').eq('id', authUser.id).single(),
+      Promise.all(historyQueries),
     ])
 
     const rawName =
@@ -568,17 +585,11 @@ export default function DashboardPage() {
     }
     setProgress(p)
 
-    if (historyRes.data && historyRes.data.length > 0) {
-      const byType: Record<string, number[]> = {}
-      for (const row of historyRes.data) {
-        if (!byType[row.goal_type]) byType[row.goal_type] = []
-        byType[row.goal_type].push(Number(row.current_amount))
-      }
-      let weekly = 0
-      for (const amounts of Object.values(byType)) {
-        if (amounts.length >= 2) weekly += amounts[amounts.length - 1] - amounts[0]
-      }
-      setWeeklySaved(weekly)
+    // This week = total balance now minus total balance a week ago (no snapshot means 0).
+    // If a history lookup failed, hide the card rather than show a wrong number.
+    if (goalsRes.data && historyResults.every((r) => !r.error)) {
+      const history = historyResults.flatMap((r) => (r.data ?? []) as HistorySnapshot[])
+      setWeeklySaved(weeklyChange(p, activeGoalTypes(goalsRes.data as Goals), history))
     } else {
       setWeeklySaved(null)
     }
@@ -647,16 +658,14 @@ export default function DashboardPage() {
   if (!goals) return null
 
   // Only count goals with a real target set
-  function isActiveGoal(title: string, amount: number) {
-    return amount > 0 && title.trim().length > 0
-  }
-  const active6month = isActiveGoal(goals.goal_6month_title, goals.goal_6month_amount)
-  const active1year  = isActiveGoal(goals.goal_1year_title,  goals.goal_1year_amount)
-  const active5year  = isActiveGoal(goals.goal_5year_title,  goals.goal_5year_amount)
+  const activeTypes = activeGoalTypes(goals)
+  const active6month = activeTypes.includes('6month')
+  const active1year  = activeTypes.includes('1year')
+  const active5year  = activeTypes.includes('5year')
   const anyActiveGoal = active6month || active1year || active5year
 
   const totalTarget = (active6month ? goals.goal_6month_amount : 0) + (active1year ? goals.goal_1year_amount : 0) + (active5year ? goals.goal_5year_amount : 0)
-  const totalSaved  = (active6month ? progress['6month'] : 0) + (active1year ? progress['1year'] : 0) + (active5year ? progress['5year'] : 0)
+  const totalSaved  = computeTotalSaved(progress, activeTypes)
   const totalPct = progressPercent(totalSaved, totalTarget)
   const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
