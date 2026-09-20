@@ -1,8 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { OrDivider } from '@/components/AuthShell'
+import GoogleButton from '@/components/GoogleButton'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -130,7 +133,15 @@ export default function LoginPage() {
               ) : 'Sign in'}
             </button>
           </form>
+
+          <OrDivider />
+          <GoogleButton />
         </div>
+
+        <p className="mt-6 text-center text-sm text-[#64748B]">
+          New to Compass?{' '}
+          <Link href="/signup" className="font-semibold text-emerald-600 hover:text-emerald-700">Create an account</Link>
+        </p>
 
       </div>
     </main>
