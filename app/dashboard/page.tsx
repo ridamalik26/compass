@@ -165,15 +165,18 @@ function GoalCreationForm({ userId, onCreated }: { userId: string; onCreated: ()
     setSaving(true)
     setError('')
 
-    const { error: err } = await supabase.from('goals').insert({
-      user_session_id: userId,
-      goal_6month_title: sixMonth.title.trim(),
-      goal_6month_amount: parseFloat(sixMonth.amount) || 0,
-      goal_1year_title: oneYear.title.trim(),
-      goal_1year_amount: parseFloat(oneYear.amount) || 0,
-      goal_5year_title: fiveYear.title.trim(),
-      goal_5year_amount: parseFloat(fiveYear.amount) || 0,
-    })
+    const { error: err } = await supabase.from('goals').upsert(
+      {
+        user_session_id: userId,
+        goal_6month_title: sixMonth.title.trim(),
+        goal_6month_amount: parseFloat(sixMonth.amount) || 0,
+        goal_1year_title: oneYear.title.trim(),
+        goal_1year_amount: parseFloat(oneYear.amount) || 0,
+        goal_5year_title: fiveYear.title.trim(),
+        goal_5year_amount: parseFloat(fiveYear.amount) || 0,
+      },
+      { onConflict: 'user_session_id' },
+    )
 
     if (err) {
       setError(err.message)
@@ -534,7 +537,7 @@ export default function DashboardPage() {
 
   async function saveProgress(type: GoalType, amount: number) {
     if (!user) return
-    await Promise.all([
+    const [progressWrite, historyWrite] = await Promise.all([
       supabase.from('goal_progress').upsert(
         { user_session_id: user.id, goal_type: type, current_amount: amount },
         { onConflict: 'user_session_id,goal_type' },
@@ -543,6 +546,12 @@ export default function DashboardPage() {
         user_session_id: user.id, goal_type: type, current_amount: amount,
       }),
     ])
+    const writeError = progressWrite.error ?? historyWrite.error
+    if (writeError) {
+      setToast({ message: `Could not update balance: ${writeError.message}`, type: 'error' })
+      await loadData()
+      return
+    }
     setToast({ message: 'Balance updated', type: 'success' })
     await loadData()
   }
