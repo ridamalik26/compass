@@ -8,3 +8,4 @@ node_modules/
 
 staging-setup.sql
 staging-phase2.sql
+staging-phase3.sql
