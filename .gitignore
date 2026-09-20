@@ -1,5 +1,5 @@
-.env.local
-.env
+.env*
+!.env.local.example
 node_modules/
 .next/
 .DS_Store
