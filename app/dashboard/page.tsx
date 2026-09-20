@@ -408,8 +408,8 @@ export default function DashboardPage() {
   const [goals, setGoals] = useState<Goals | null>(null)
   const [progress, setProgress] = useState<Progress>({ '6month': 0, '1year': 0, '5year': 0 })
   const [loading, setLoading] = useState(true)
-  const [recommendation, setRecommendation] = useState('')
-  const [recError, setRecError] = useState('')
+  const [advice, setAdvice] = useState<{ text: string; quick: boolean } | null>(null)
+  const [recFailed, setRecFailed] = useState(false)
   const [recLoading, setRecLoading] = useState(false)
   const [recFetched, setRecFetched] = useState(false)
   const [weeklySaved, setWeeklySaved] = useState<number | null>(null)
@@ -421,40 +421,38 @@ export default function DashboardPage() {
     return () => clearTimeout(t)
   }, [toast])
 
-  const fetchRecommendations = useCallback(async (goalsData: Goals, progressData: Progress) => {
-    const allGoals = [
-      { type: '6month' as GoalType, title: goalsData.goal_6month_title, targetAmount: goalsData.goal_6month_amount, currentAmount: progressData['6month'], daysTotal: 180  },
-      { type: '1year'  as GoalType, title: goalsData.goal_1year_title,  targetAmount: goalsData.goal_1year_amount,  currentAmount: progressData['1year'],  daysTotal: 365  },
-      { type: '5year'  as GoalType, title: goalsData.goal_5year_title,  targetAmount: goalsData.goal_5year_amount,  currentAmount: progressData['5year'],  daysTotal: 1825 },
-    ]
-    const activeGoals = allGoals.filter(g => g.targetAmount > 0 && g.title.trim().length > 0)
-
-    if (activeGoals.length === 0) return
+  const fetchRecommendations = useCallback(async (goalsData: Goals) => {
+    const hasActiveGoal =
+      (goalsData.goal_6month_amount > 0 && goalsData.goal_6month_title.trim().length > 0) ||
+      (goalsData.goal_1year_amount > 0 && goalsData.goal_1year_title.trim().length > 0) ||
+      (goalsData.goal_5year_amount > 0 && goalsData.goal_5year_title.trim().length > 0)
+    if (!hasActiveGoal) return
 
     setRecLoading(true)
-    setRecError('')
-    setRecommendation('')
+    setRecFailed(false)
+    setAdvice(null)
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 10_000)
     try {
       const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/recommendations', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
-        },
-        body: JSON.stringify({
-          goals: activeGoals.map(g => ({
-            ...g,
-            createdAt: goalsData.created_at,
-            status: getStatus(g.targetAmount, g.currentAmount, g.daysTotal, goalsData.created_at),
-          })),
-        }),
+        headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
+        signal: controller.signal,
       })
       const data = await res.json()
-      if (!res.ok || data.error) setRecError(data.error ?? `Error ${res.status}`)
-      else setRecommendation(data.recommendation ?? '')
-    } catch (err) {
-      setRecError(err instanceof Error ? err.message : 'Network error')
+      if (!res.ok || typeof data.advice !== 'string' || !data.advice) {
+        setRecFailed(true)
+      } else {
+        setAdvice({
+          text: data.advice,
+          quick: data.source === 'rules' || (data.source === 'cache' && data.origin === 'rules'),
+        })
+      }
+    } catch {
+      setRecFailed(true)
+    } finally {
+      clearTimeout(timer)
     }
     setRecLoading(false)
     setRecFetched(true)
@@ -510,7 +508,7 @@ export default function DashboardPage() {
       const g = goalsRes.data as Goals
       setGoals(g)
       setLoading(false)
-      fetchRecommendations(g, p)
+      fetchRecommendations(g)
     } else {
       setLoading(false)
     }
@@ -649,9 +647,12 @@ export default function DashboardPage() {
                     </svg>
                   </div>
                   <span className="font-heading text-sm font-bold text-[#0F172A]">Your AI coach</span>
+                  {advice?.quick && (
+                    <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">Quick tips</span>
+                  )}
                 </div>
                 {recFetched && !recLoading && (
-                  <button onClick={() => fetchRecommendations(goals, progress)} className="text-xs font-medium text-indigo-600 hover:text-indigo-700">
+                  <button onClick={() => fetchRecommendations(goals)} className="text-xs font-medium text-indigo-600 hover:text-indigo-700">
                     Refresh
                   </button>
                 )}
@@ -665,17 +666,16 @@ export default function DashboardPage() {
                   </svg>
                   <span className="text-sm text-[#64748B]">Analyzing your goals…</span>
                 </div>
-              ) : recError ? (
-                <div className="rounded-xl border border-red-100 bg-red-50 p-4">
-                  <p className="text-xs font-semibold text-red-700">Could not load recommendations</p>
-                  <p className="mt-1 text-sm text-red-600">{recError}</p>
-                  <button onClick={() => fetchRecommendations(goals, progress)} className="mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-700">
-                    Try again
+              ) : recFailed ? (
+                <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
+                  <p className="text-sm text-[#475569]">Tips are unavailable right now. Please try again in a moment.</p>
+                  <button onClick={() => fetchRecommendations(goals)} className="mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-700">
+                    Retry
                   </button>
                 </div>
-              ) : recommendation ? (
+              ) : advice ? (
                 <>
-                  <p className="text-sm leading-relaxed text-[#374151] whitespace-pre-wrap">{recommendation}</p>
+                  <p className="text-sm leading-relaxed text-[#374151] whitespace-pre-wrap">{advice.text}</p>
                   <div className="pt-1 border-t border-[#F1F5F9]">
                     <p className="text-xs text-[#94A3B8]">
                       Want to create a new goal?{' '}
