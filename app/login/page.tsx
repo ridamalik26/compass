@@ -1,14 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { OrDivider } from '@/components/AuthShell'
 import GoogleButton from '@/components/GoogleButton'
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState<'checking' | 'idle' | 'loading' | 'error'>('checking')
@@ -111,6 +112,18 @@ export default function LoginPage() {
               <label htmlFor="password" className="fl-label">Password</label>
             </div>
 
+            <div className="-mt-1 text-right">
+              <Link href="/forgot-password" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">
+                Forgot password?
+              </Link>
+            </div>
+
+            {searchParams.get('reset') === '1' && status !== 'error' && (
+              <div role="status" className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                Password updated. Please sign in with your new password.
+              </div>
+            )}
+
             {status === 'error' && (
               <div role="alert" className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
                 {errorMsg}
@@ -145,5 +158,13 @@ export default function LoginPage() {
 
       </div>
     </main>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-[#F8FAFC]" />}>
+      <LoginForm />
+    </Suspense>
   )
 }
