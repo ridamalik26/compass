@@ -1,11 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
+import Link from 'next/link'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { OrDivider } from '@/components/AuthShell'
+import GoogleButton from '@/components/GoogleButton'
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState<'checking' | 'idle' | 'loading' | 'error'>('checking')
@@ -23,23 +27,12 @@ export default function LoginPage() {
     setStatus('loading')
     setErrorMsg('')
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
       setStatus('error')
       setErrorMsg(error.message)
       return
-    }
-
-    if (data.user) {
-      await supabase.from('users').upsert(
-        {
-          id: data.user.id,
-          full_name: (data.user.user_metadata?.name as string | undefined) ?? null,
-          email: data.user.email,
-        },
-        { onConflict: 'id' },
-      )
     }
 
     router.push('/dashboard')
@@ -108,6 +101,24 @@ export default function LoginPage() {
               <label htmlFor="password" className="fl-label">Password</label>
             </div>
 
+            <div className="-mt-1 text-right">
+              <Link href="/forgot-password" className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">
+                Forgot password?
+              </Link>
+            </div>
+
+            {searchParams.get('expired') === '1' && status !== 'error' && (
+              <div role="status" className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                Your session expired, please log in again.
+              </div>
+            )}
+
+            {searchParams.get('reset') === '1' && status !== 'error' && (
+              <div role="status" className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                Password updated. Please sign in with your new password.
+              </div>
+            )}
+
             {status === 'error' && (
               <div role="alert" className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
                 {errorMsg}
@@ -130,9 +141,25 @@ export default function LoginPage() {
               ) : 'Sign in'}
             </button>
           </form>
+
+          <OrDivider />
+          <GoogleButton />
         </div>
+
+        <p className="mt-6 text-center text-sm text-[#64748B]">
+          New to Compass?{' '}
+          <Link href="/signup" className="font-semibold text-emerald-600 hover:text-emerald-700">Create an account</Link>
+        </p>
 
       </div>
     </main>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-[#F8FAFC]" />}>
+      <LoginForm />
+    </Suspense>
   )
 }

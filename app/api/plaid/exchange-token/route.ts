@@ -1,5 +1,6 @@
 import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid'
-import { createServerClient, getAuthUser } from '@/lib/supabase-server'
+import { getAuthUser } from '@/lib/supabase-server'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 const configuration = new Configuration({
   basePath: PlaidEnvironments[process.env.PLAID_ENV as keyof typeof PlaidEnvironments ?? 'sandbox'],
@@ -26,8 +27,8 @@ export async function POST(request: Request) {
 
     const { access_token, item_id } = exchangeResponse.data
 
-    const supabase = createServerClient(request.headers.get('Authorization'))
-    const { error } = await supabase.from('plaid_tokens').upsert(
+    // Service-role client: plaid_tokens has no RLS policies. user.id was verified by getAuthUser above.
+    const { error } = await getSupabaseAdmin().from('plaid_tokens').upsert(
       { user_session_id: user.id, access_token, item_id },
       { onConflict: 'user_session_id' },
     )

@@ -1,7 +1,11 @@
-.env.local
-.env
+.env*
+!.env.local.example
 node_modules/
 .next/
 .DS_Store
 
 .vercel
+
+staging-setup.sql
+staging-phase2.sql
+staging-phase3.sql

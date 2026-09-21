@@ -1,12 +1,15 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import Navbar from '@/components/Navbar'
 import Toast from '@/components/Toast'
 import type { User } from '@supabase/supabase-js'
+import { evaluateBalanceChange, formatMoney, type BalanceMode } from '@/lib/balance'
+import { totalSaved as computeTotalSaved, weeklyChange, type HistorySnapshot } from '@/lib/savings'
+import { GOAL_DAYS, getStatus, daysLeft, type GoalType, type StatusLabel } from '@/lib/pace'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,12 +34,18 @@ interface Progress {
   '5year': number
 }
 
-type GoalType = '6month' | '1year' | '5year'
-type StatusLabel = 'Ahead' | 'On Track' | 'Behind'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const DAYS_TOTAL: Record<GoalType, number> = { '6month': 180, '1year': 365, '5year': 1825 }
+
+// A goal counts only when it has a real title and target (cleared goals do not).
+function activeGoalTypes(g: Goals): GoalType[] {
+  const types: GoalType[] = []
+  if (g.goal_6month_amount > 0 && g.goal_6month_title.trim().length > 0) types.push('6month')
+  if (g.goal_1year_amount > 0 && g.goal_1year_title.trim().length > 0) types.push('1year')
+  if (g.goal_5year_amount > 0 && g.goal_5year_title.trim().length > 0) types.push('5year')
+  return types
+}
 
 function getGreeting(): string {
   const h = new Date().getHours()
@@ -45,23 +54,8 @@ function getGreeting(): string {
   return 'Good evening'
 }
 
-function getStatus(targetAmount: number, currentAmount: number, daysTotal: number, createdAt: string): StatusLabel {
-  const daysSince = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000))
-  const timeElapsed = Math.min(daysSince / daysTotal, 1)
-  const expectedAmount = timeElapsed * targetAmount
-  const buffer = targetAmount * 0.05
-  if (currentAmount >= expectedAmount + buffer) return 'Ahead'
-  if (currentAmount <= expectedAmount - buffer) return 'Behind'
-  return 'On Track'
-}
-
 function progressPercent(current: number, target: number) {
   return target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0
-}
-
-function daysLeft(daysTotal: number, createdAt: string) {
-  const daysSince = Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000)
-  return Math.max(0, daysTotal - daysSince)
 }
 
 function fmtUSD(n: number) {
@@ -165,15 +159,18 @@ function GoalCreationForm({ userId, onCreated }: { userId: string; onCreated: ()
     setSaving(true)
     setError('')
 
-    const { error: err } = await supabase.from('goals').insert({
-      user_session_id: userId,
-      goal_6month_title: sixMonth.title.trim(),
-      goal_6month_amount: parseFloat(sixMonth.amount) || 0,
-      goal_1year_title: oneYear.title.trim(),
-      goal_1year_amount: parseFloat(oneYear.amount) || 0,
-      goal_5year_title: fiveYear.title.trim(),
-      goal_5year_amount: parseFloat(fiveYear.amount) || 0,
-    })
+    const { error: err } = await supabase.from('goals').upsert(
+      {
+        user_session_id: userId,
+        goal_6month_title: sixMonth.title.trim(),
+        goal_6month_amount: parseFloat(sixMonth.amount) || 0,
+        goal_1year_title: oneYear.title.trim(),
+        goal_1year_amount: parseFloat(oneYear.amount) || 0,
+        goal_5year_title: fiveYear.title.trim(),
+        goal_5year_amount: parseFloat(fiveYear.amount) || 0,
+      },
+      { onConflict: 'user_session_id' },
+    )
 
     if (err) {
       setError(err.message)
@@ -310,7 +307,37 @@ interface GoalCardProps {
 function GoalCard({ type, badge, title, description, targetAmount, currentAmount, daysTotal, createdAt, onSave }: GoalCardProps) {
   const [isUpdating, setIsUpdating] = useState(false)
   const [updateValue, setUpdateValue] = useState('')
+  const [mode, setMode] = useState<BalanceMode>('add')
+  const [submitted, setSubmitted] = useState(false)
   const [saving, setSaving] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!isUpdating) return
+    const el = inputRef.current
+    if (!el) return
+    el.focus()
+    if (mode === 'set') el.select()
+  }, [isUpdating, mode])
+
+  function startEdit() {
+    setMode('add')
+    setUpdateValue('')
+    setSubmitted(false)
+    setIsUpdating(true)
+  }
+
+  function changeMode(next: BalanceMode) {
+    setMode(next)
+    setUpdateValue(next === 'set' ? String(currentAmount) : '')
+    setSubmitted(false)
+  }
+
+  function closeEdit() {
+    setIsUpdating(false)
+    setUpdateValue('')
+    setSubmitted(false)
+  }
 
   const status = getStatus(targetAmount, currentAmount, daysTotal, createdAt)
   const pct = progressPercent(currentAmount, targetAmount)
@@ -323,12 +350,25 @@ function GoalCard({ type, badge, title, description, targetAmount, currentAmount
     Behind: 'bg-red-500',
   }
 
-  async function handleSave() {
+  const result = evaluateBalanceChange(mode, updateValue, currentAmount)
+  const showFeedback = submitted || updateValue.trim() !== ''
+
+  const MODES: { value: BalanceMode; label: string; placeholder: string }[] = [
+    { value: 'add', label: 'Add money', placeholder: 'Amount to add' },
+    { value: 'withdraw', label: 'Withdraw', placeholder: 'Amount to withdraw' },
+    { value: 'set', label: 'Set balance', placeholder: 'New balance' },
+  ]
+
+  async function handleSave(e?: { preventDefault(): void }) {
+    e?.preventDefault()
+    if (!result.ok) {
+      setSubmitted(true)
+      return
+    }
     setSaving(true)
-    await onSave(type, parseFloat(updateValue) || 0)
+    await onSave(type, result.newBalance)
     setSaving(false)
-    setIsUpdating(false)
-    setUpdateValue('')
+    closeEdit()
   }
 
   return (
@@ -371,7 +411,7 @@ function GoalCard({ type, badge, title, description, targetAmount, currentAmount
         <span className="text-xs text-[#94A3B8]">{fmtUSD(currentAmount)} of {fmtUSD(targetAmount)}</span>
         {!isUpdating && (
           <button
-            onClick={() => { setIsUpdating(true); setUpdateValue(String(currentAmount)) }}
+            onClick={startEdit}
             className="text-xs font-medium text-[#64748B] transition hover:text-emerald-600"
           >
             Update Balance
@@ -381,33 +421,66 @@ function GoalCard({ type, badge, title, description, targetAmount, currentAmount
 
       {/* Inline update form */}
       {isUpdating && (
-        <div className="flex items-center gap-2 border-t border-[#F1F5F9] pt-4">
-          <div className="relative flex-1">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-emerald-500">$</span>
-            <input
-              type="number"
-              min="0"
-              step="any"
-              autoFocus
-              value={updateValue}
-              onChange={(e) => setUpdateValue(e.target.value)}
-              className="w-full rounded-xl border border-[#E2E8F0] py-2.5 pl-7 pr-3 text-sm text-[#0F172A] outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            />
+        <form onSubmit={handleSave} noValidate className="space-y-3 border-t border-[#F1F5F9] pt-4">
+          <div role="radiogroup" aria-label="Balance update type" className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
+            {MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                role="radio"
+                aria-checked={mode === m.value}
+                onClick={() => changeMode(m.value)}
+                className={`min-h-[40px] rounded-lg px-2 text-xs font-semibold transition ${
+                  mode === m.value ? 'bg-white text-emerald-700 shadow-sm' : 'text-[#64748B] hover:text-[#0F172A]'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
           </div>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:opacity-60 min-h-[44px]"
-          >
-            {saving ? 'Saving' : 'Save'}
-          </button>
-          <button
-            onClick={() => { setIsUpdating(false); setUpdateValue('') }}
-            className="rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-medium text-[#64748B] transition hover:bg-[#F8FAFC] min-h-[44px]"
-          >
-            Cancel
-          </button>
-        </div>
+
+          <div className="flex items-start gap-2">
+            <div className="relative flex-1">
+              <span className="pointer-events-none absolute left-3 top-[22px] -translate-y-1/2 text-sm font-semibold text-emerald-500">$</span>
+              <input
+                ref={inputRef}
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                aria-label={MODES.find((m) => m.value === mode)?.placeholder}
+                aria-invalid={showFeedback && !result.ok}
+                placeholder={MODES.find((m) => m.value === mode)?.placeholder}
+                value={updateValue}
+                onFocus={(e) => { if (mode === 'set') e.currentTarget.select() }}
+                onChange={(e) => setUpdateValue(e.target.value)}
+                className="min-h-[44px] w-full rounded-xl border border-[#E2E8F0] py-2.5 pl-7 pr-3 text-sm text-[#0F172A] outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10"
+              />
+              {showFeedback && !result.ok && (
+                <p role="alert" className="mt-1.5 text-xs text-red-600">{result.message}</p>
+              )}
+              {showFeedback && result.ok && (
+                <p className="mt-1.5 text-xs font-medium text-emerald-600">New balance: {formatMoney(result.newBalance)}</p>
+              )}
+              {!showFeedback && (
+                <p className="mt-1.5 text-xs text-[#94A3B8]">Current balance: {formatMoney(currentAmount)}</p>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:opacity-60 min-h-[44px]"
+            >
+              {saving ? 'Saving' : 'Save'}
+            </button>
+            <button
+              type="button"
+              onClick={closeEdit}
+              className="rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-medium text-[#64748B] transition hover:bg-[#F8FAFC] min-h-[44px]"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       )}
     </div>
   )
@@ -422,8 +495,8 @@ export default function DashboardPage() {
   const [goals, setGoals] = useState<Goals | null>(null)
   const [progress, setProgress] = useState<Progress>({ '6month': 0, '1year': 0, '5year': 0 })
   const [loading, setLoading] = useState(true)
-  const [recommendation, setRecommendation] = useState('')
-  const [recError, setRecError] = useState('')
+  const [advice, setAdvice] = useState<{ text: string; quick: boolean } | null>(null)
+  const [recFailed, setRecFailed] = useState(false)
   const [recLoading, setRecLoading] = useState(false)
   const [recFetched, setRecFetched] = useState(false)
   const [weeklySaved, setWeeklySaved] = useState<number | null>(null)
@@ -435,36 +508,38 @@ export default function DashboardPage() {
     return () => clearTimeout(t)
   }, [toast])
 
-  const fetchRecommendations = useCallback(async (goalsData: Goals, progressData: Progress) => {
-    const allGoals = [
-      { type: '6month' as GoalType, title: goalsData.goal_6month_title, targetAmount: goalsData.goal_6month_amount, currentAmount: progressData['6month'], daysTotal: 180  },
-      { type: '1year'  as GoalType, title: goalsData.goal_1year_title,  targetAmount: goalsData.goal_1year_amount,  currentAmount: progressData['1year'],  daysTotal: 365  },
-      { type: '5year'  as GoalType, title: goalsData.goal_5year_title,  targetAmount: goalsData.goal_5year_amount,  currentAmount: progressData['5year'],  daysTotal: 1825 },
-    ]
-    const activeGoals = allGoals.filter(g => g.targetAmount > 0 && g.title.trim().length > 0)
-
-    if (activeGoals.length === 0) return
+  const fetchRecommendations = useCallback(async (goalsData: Goals) => {
+    const hasActiveGoal =
+      (goalsData.goal_6month_amount > 0 && goalsData.goal_6month_title.trim().length > 0) ||
+      (goalsData.goal_1year_amount > 0 && goalsData.goal_1year_title.trim().length > 0) ||
+      (goalsData.goal_5year_amount > 0 && goalsData.goal_5year_title.trim().length > 0)
+    if (!hasActiveGoal) return
 
     setRecLoading(true)
-    setRecError('')
-    setRecommendation('')
+    setRecFailed(false)
+    setAdvice(null)
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 10_000)
     try {
+      const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/recommendations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          goals: activeGoals.map(g => ({
-            ...g,
-            createdAt: goalsData.created_at,
-            status: getStatus(g.targetAmount, g.currentAmount, g.daysTotal, goalsData.created_at),
-          })),
-        }),
+        headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
+        signal: controller.signal,
       })
       const data = await res.json()
-      if (!res.ok || data.error) setRecError(data.error ?? `Error ${res.status}`)
-      else setRecommendation(data.recommendation ?? '')
-    } catch (err) {
-      setRecError(err instanceof Error ? err.message : 'Network error')
+      if (!res.ok || typeof data.advice !== 'string' || !data.advice) {
+        setRecFailed(true)
+      } else {
+        setAdvice({
+          text: data.advice,
+          quick: data.source === 'rules' || (data.source === 'cache' && data.origin === 'rules'),
+        })
+      }
+    } catch {
+      setRecFailed(true)
+    } finally {
+      clearTimeout(timer)
     }
     setRecLoading(false)
     setRecFetched(true)
@@ -475,24 +550,33 @@ export default function DashboardPage() {
     if (!authUser) { router.push('/login'); return }
     setUser(authUser)
 
-    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString()
+    const cutoffIso = new Date(Date.now() - 7 * 86_400_000).toISOString()
 
-    const [goalsRes, progressRes, profileRes, historyRes] = await Promise.all([
-      supabase.from('goals').select('*').eq('user_session_id', authUser.id).single(),
-      supabase.from('goal_progress').select('*').eq('user_session_id', authUser.id),
-      supabase.from('users').select('full_name').eq('id', authUser.id).single(),
+    // For each goal, its last snapshot at or before 7 days ago (the balance a week ago).
+    const historyQueries = (['6month', '1year', '5year'] as GoalType[]).map((t) =>
       supabase
         .from('goal_progress_history')
         .select('goal_type, current_amount, recorded_at')
         .eq('user_session_id', authUser.id)
-        .gte('recorded_at', sevenDaysAgo)
-        .order('recorded_at', { ascending: true }),
+        .eq('goal_type', t)
+        .lte('recorded_at', cutoffIso)
+        .order('recorded_at', { ascending: false })
+        .limit(1),
+    )
+
+    const [goalsRes, progressRes, profileRes, historyResults] = await Promise.all([
+      supabase.from('goals').select('*').eq('user_session_id', authUser.id).single(),
+      supabase.from('goal_progress').select('*').eq('user_session_id', authUser.id),
+      supabase.from('users').select('full_name').eq('id', authUser.id).single(),
+      Promise.all(historyQueries),
     ])
 
     const rawName =
-      (profileRes.data?.full_name as string | null) ??
-      (authUser.user_metadata?.name as string | undefined) ??
-      authUser.email ?? 'there'
+      (profileRes.data?.full_name as string | null) ||
+      (authUser.user_metadata?.name as string | undefined) ||
+      (authUser.user_metadata?.full_name as string | undefined) ||
+      authUser.email?.split('@')[0] ||
+      'there'
     setUserName(rawName.split(' ')[0])
 
     const p: Progress = { '6month': 0, '1year': 0, '5year': 0 }
@@ -501,17 +585,11 @@ export default function DashboardPage() {
     }
     setProgress(p)
 
-    if (historyRes.data && historyRes.data.length > 0) {
-      const byType: Record<string, number[]> = {}
-      for (const row of historyRes.data) {
-        if (!byType[row.goal_type]) byType[row.goal_type] = []
-        byType[row.goal_type].push(Number(row.current_amount))
-      }
-      let weekly = 0
-      for (const amounts of Object.values(byType)) {
-        if (amounts.length >= 2) weekly += amounts[amounts.length - 1] - amounts[0]
-      }
-      setWeeklySaved(weekly)
+    // This week = total balance now minus total balance a week ago (no snapshot means 0).
+    // If a history lookup failed, hide the card rather than show a wrong number.
+    if (goalsRes.data && historyResults.every((r) => !r.error)) {
+      const history = historyResults.flatMap((r) => (r.data ?? []) as HistorySnapshot[])
+      setWeeklySaved(weeklyChange(p, activeGoalTypes(goalsRes.data as Goals), history))
     } else {
       setWeeklySaved(null)
     }
@@ -520,17 +598,21 @@ export default function DashboardPage() {
       const g = goalsRes.data as Goals
       setGoals(g)
       setLoading(false)
-      fetchRecommendations(g, p)
+      fetchRecommendations(g)
     } else {
       setLoading(false)
     }
   }, [router, fetchRecommendations])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => {
+    // Deferred one tick so the initial fetch is not a synchronous setState inside the effect body.
+    const id = setTimeout(loadData, 0)
+    return () => clearTimeout(id)
+  }, [loadData])
 
   async function saveProgress(type: GoalType, amount: number) {
     if (!user) return
-    await Promise.all([
+    const [progressWrite, historyWrite] = await Promise.all([
       supabase.from('goal_progress').upsert(
         { user_session_id: user.id, goal_type: type, current_amount: amount },
         { onConflict: 'user_session_id,goal_type' },
@@ -539,6 +621,12 @@ export default function DashboardPage() {
         user_session_id: user.id, goal_type: type, current_amount: amount,
       }),
     ])
+    const writeError = progressWrite.error ?? historyWrite.error
+    if (writeError) {
+      setToast({ message: `Could not update balance: ${writeError.message}`, type: 'error' })
+      await loadData()
+      return
+    }
     setToast({ message: 'Balance updated', type: 'success' })
     await loadData()
   }
@@ -570,16 +658,14 @@ export default function DashboardPage() {
   if (!goals) return null
 
   // Only count goals with a real target set
-  function isActiveGoal(title: string, amount: number) {
-    return amount > 0 && title.trim().length > 0
-  }
-  const active6month = isActiveGoal(goals.goal_6month_title, goals.goal_6month_amount)
-  const active1year  = isActiveGoal(goals.goal_1year_title,  goals.goal_1year_amount)
-  const active5year  = isActiveGoal(goals.goal_5year_title,  goals.goal_5year_amount)
+  const activeTypes = activeGoalTypes(goals)
+  const active6month = activeTypes.includes('6month')
+  const active1year  = activeTypes.includes('1year')
+  const active5year  = activeTypes.includes('5year')
   const anyActiveGoal = active6month || active1year || active5year
 
   const totalTarget = (active6month ? goals.goal_6month_amount : 0) + (active1year ? goals.goal_1year_amount : 0) + (active5year ? goals.goal_5year_amount : 0)
-  const totalSaved  = (active6month ? progress['6month'] : 0) + (active1year ? progress['1year'] : 0) + (active5year ? progress['5year'] : 0)
+  const totalSaved  = computeTotalSaved(progress, activeTypes)
   const totalPct = progressPercent(totalSaved, totalTarget)
   const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
@@ -633,9 +719,9 @@ export default function DashboardPage() {
         {anyActiveGoal && (
           <section className="space-y-3">
             <h2 className="font-heading text-sm font-bold text-[#0F172A]">Your Goals</h2>
-            {active6month && <GoalCard type="6month" badge="6 mo" title={goals.goal_6month_title} description={goals.goal_6month_description} targetAmount={goals.goal_6month_amount} currentAmount={progress['6month']} daysTotal={DAYS_TOTAL['6month']} createdAt={goals.created_at} onSave={saveProgress} />}
-            {active1year  && <GoalCard type="1year"  badge="1 yr"  title={goals.goal_1year_title}  description={goals.goal_1year_description}  targetAmount={goals.goal_1year_amount}  currentAmount={progress['1year']}  daysTotal={DAYS_TOTAL['1year']}  createdAt={goals.created_at} onSave={saveProgress} />}
-            {active5year  && <GoalCard type="5year"  badge="5 yr"  title={goals.goal_5year_title}  description={goals.goal_5year_description}  targetAmount={goals.goal_5year_amount}  currentAmount={progress['5year']}  daysTotal={DAYS_TOTAL['5year']}  createdAt={goals.created_at} onSave={saveProgress} />}
+            {active6month && <GoalCard type="6month" badge="6 mo" title={goals.goal_6month_title} description={goals.goal_6month_description} targetAmount={goals.goal_6month_amount} currentAmount={progress['6month']} daysTotal={GOAL_DAYS['6month']} createdAt={goals.created_at} onSave={saveProgress} />}
+            {active1year  && <GoalCard type="1year"  badge="1 yr"  title={goals.goal_1year_title}  description={goals.goal_1year_description}  targetAmount={goals.goal_1year_amount}  currentAmount={progress['1year']}  daysTotal={GOAL_DAYS['1year']}  createdAt={goals.created_at} onSave={saveProgress} />}
+            {active5year  && <GoalCard type="5year"  badge="5 yr"  title={goals.goal_5year_title}  description={goals.goal_5year_description}  targetAmount={goals.goal_5year_amount}  currentAmount={progress['5year']}  daysTotal={GOAL_DAYS['5year']}  createdAt={goals.created_at} onSave={saveProgress} />}
           </section>
         )}
 
@@ -653,9 +739,12 @@ export default function DashboardPage() {
                     </svg>
                   </div>
                   <span className="font-heading text-sm font-bold text-[#0F172A]">Your AI coach</span>
+                  {advice?.quick && (
+                    <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">Quick tips</span>
+                  )}
                 </div>
                 {recFetched && !recLoading && (
-                  <button onClick={() => fetchRecommendations(goals, progress)} className="text-xs font-medium text-indigo-600 hover:text-indigo-700">
+                  <button onClick={() => fetchRecommendations(goals)} className="text-xs font-medium text-indigo-600 hover:text-indigo-700">
                     Refresh
                   </button>
                 )}
@@ -669,17 +758,16 @@ export default function DashboardPage() {
                   </svg>
                   <span className="text-sm text-[#64748B]">Analyzing your goals…</span>
                 </div>
-              ) : recError ? (
-                <div className="rounded-xl border border-red-100 bg-red-50 p-4">
-                  <p className="text-xs font-semibold text-red-700">Could not load recommendations</p>
-                  <p className="mt-1 text-sm text-red-600">{recError}</p>
-                  <button onClick={() => fetchRecommendations(goals, progress)} className="mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-700">
-                    Try again
+              ) : recFailed ? (
+                <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
+                  <p className="text-sm text-[#475569]">Tips are unavailable right now. Please try again in a moment.</p>
+                  <button onClick={() => fetchRecommendations(goals)} className="mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-700">
+                    Retry
                   </button>
                 </div>
-              ) : recommendation ? (
+              ) : advice ? (
                 <>
-                  <p className="text-sm leading-relaxed text-[#374151] whitespace-pre-wrap">{recommendation}</p>
+                  <p className="text-sm leading-relaxed text-[#374151] whitespace-pre-wrap">{advice.text}</p>
                   <div className="pt-1 border-t border-[#F1F5F9]">
                     <p className="text-xs text-[#94A3B8]">
                       Want to create a new goal?{' '}

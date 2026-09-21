@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { markIntentionalSignOut } from '@/lib/auth-flag'
 
 const NAV = [
   {
@@ -55,6 +56,7 @@ export default function Navbar() {
 
   async function handleSignOut() {
     setDropdownOpen(false)
+    markIntentionalSignOut()
     await supabase.auth.signOut()
     router.push('/login')
   }
