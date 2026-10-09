@@ -19,10 +19,14 @@ export function daysSince(createdAt: string, now: number = Date.now()): number {
   return Math.max(0, Math.floor((now - created) / MS_PER_DAY))
 }
 
-/** Days remaining, between 0 and daysTotal. A zero or invalid daysTotal gives 0. */
+/**
+ * Days remaining, clamped to [0, daysTotal]. A zero or invalid daysTotal gives 0. A createdAt in
+ * the future gives daysTotal (daysSince is already clamped at 0, so this is the explicit upper
+ * bound rather than a value that could otherwise exceed daysTotal).
+ */
 export function daysLeft(daysTotal: number, createdAt: string, now: number = Date.now()): number {
   if (!isValidDaysTotal(daysTotal)) return 0
-  return Math.max(0, daysTotal - daysSince(createdAt, now))
+  return Math.min(daysTotal, Math.max(0, daysTotal - daysSince(createdAt, now)))
 }
 
 /** Amount that should be saved by now on a straight-line pace. */
