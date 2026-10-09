@@ -8,7 +8,7 @@ import Navbar from '@/components/Navbar'
 import Toast from '@/components/Toast'
 import type { User } from '@supabase/supabase-js'
 import { evaluateBalanceChange, formatMoney, type BalanceMode } from '@/lib/balance'
-import { centsToDollars, parseMoneyToCents } from '@/lib/money'
+import { centsToDollars, dollarsToCents, parseMoneyToCents } from '@/lib/money'
 import { totalSaved as computeTotalSaved, weeklyChange, type HistorySnapshot } from '@/lib/savings'
 import { GOAL_DAYS, getStatus, daysLeft, type GoalType, type StatusLabel } from '@/lib/pace'
 
@@ -632,16 +632,11 @@ export default function DashboardPage() {
 
   async function saveProgress(type: GoalType, amount: number) {
     if (!user) return
-    const [progressWrite, historyWrite] = await Promise.all([
-      supabase.from('goal_progress').upsert(
-        { user_session_id: user.id, goal_type: type, current_amount: amount },
-        { onConflict: 'user_session_id,goal_type' },
-      ),
-      supabase.from('goal_progress_history').insert({
-        user_session_id: user.id, goal_type: type, current_amount: amount,
-      }),
-    ])
-    const writeError = progressWrite.error ?? historyWrite.error
+    // One transaction: the balance upsert and the history insert either both land or neither does.
+    const { error: writeError } = await supabase.rpc('save_progress', {
+      goal_type: type,
+      amount_cents: dollarsToCents(amount),
+    })
     if (writeError) {
       setToast({ message: `Could not update balance: ${writeError.message}`, type: 'error' })
       await loadData()

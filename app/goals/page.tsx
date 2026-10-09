@@ -346,11 +346,14 @@ export default function GoalsPage() {
   async function handleReset() {
     if (!userId) return
     setResetting(true)
-    await Promise.all([
-      supabase.from('goal_progress_history').delete().eq('user_session_id', userId),
-      supabase.from('goal_progress').delete().eq('user_session_id', userId),
-    ])
-    await supabase.from('goals').delete().eq('user_session_id', userId)
+    // One transaction: history, progress and goals are deleted together, or not at all.
+    const { error } = await supabase.rpc('reset_goals')
+    setResetting(false)
+    if (error) {
+      setToast({ message: `Could not reset goals: ${error.message}`, type: 'error' })
+      setConfirmReset(false)
+      return
+    }
     router.push('/dashboard')
   }
 
