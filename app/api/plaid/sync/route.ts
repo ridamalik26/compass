@@ -2,6 +2,7 @@ import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid'
 import { createServerClient, getAuthUser } from '@/lib/supabase-server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { dollarsToCents, splitThreeWays } from '@/lib/money'
+import { computeNetSavingsCents, filterNewTransactions } from '@/lib/plaid-sync'
 import type { GoalType } from '@/lib/pace'
 
 export const maxDuration = 30
@@ -81,7 +82,7 @@ export async function POST(request: Request) {
       return Response.json({ error: `Failed to check existing transactions: ${existingRes.error.message}` }, { status: 500 })
     }
     const alreadyCounted = new Set((existingRes.data ?? []).map((row) => row.transaction_id))
-    const newTransactions = transactions.filter((tx) => !alreadyCounted.has(tx.transaction_id))
+    const newTransactions = filterNewTransactions(transactions, alreadyCounted)
 
     if (transactions.length > 0) {
       const { error: txError } = await supabase.from('transactions').upsert(
@@ -100,12 +101,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // Plaid: positive amount = debit (money out), negative = credit (money in). Summed in cents
-    // per transaction so repeated additions cannot drift the total away from the true sum.
-    const netSavingsCents = newTransactions.reduce((sum, tx) => {
-      const amountCents = dollarsToCents(tx.amount)
-      return sum + (amountCents > 0 ? -amountCents : Math.abs(amountCents))
-    }, 0)
+    const netSavingsCents = computeNetSavingsCents(newTransactions)
 
     if (netSavingsCents <= 0) {
       return Response.json({ synced: transactions.length, netSavings: 0, updated: false })
