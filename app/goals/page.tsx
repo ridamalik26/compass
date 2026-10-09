@@ -6,6 +6,9 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import Navbar from '@/components/Navbar'
 import Toast from '@/components/Toast'
+import { centsToDollars, parseMoneyToCents } from '@/lib/money'
+
+const MAX_TITLE_LENGTH = 80
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -111,8 +114,13 @@ function GoalCard({
   }
 
   async function handleSave() {
-    const newTitle = draftTitle.trim()
-    const newAmount = parseFloat(draftAmount) || 0
+    const newTitle = draftTitle.trim().slice(0, MAX_TITLE_LENGTH)
+    const parsed = parseMoneyToCents(draftAmount)
+    if (!parsed.ok) {
+      onToast(parsed.message, 'error')
+      return
+    }
+    const newAmount = centsToDollars(parsed.cents)
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { onToast('Not authenticated', 'error'); setSaving(false); return }
@@ -227,6 +235,7 @@ function GoalCard({
               <input
                 type="text"
                 autoFocus
+                maxLength={MAX_TITLE_LENGTH}
                 value={draftTitle}
                 onChange={(e) => setDraftTitle(e.target.value)}
                 placeholder={label}
