@@ -10,3 +10,4 @@ staging-setup.sql
 staging-phase2.sql
 staging-phase3.sql
 staging-phase4.sql
+staging-keepalive.sql
