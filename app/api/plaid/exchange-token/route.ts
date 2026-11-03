@@ -1,6 +1,11 @@
 import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid'
+import { z } from 'zod'
 import { getAuthUser } from '@/lib/supabase-server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+
+const exchangeTokenSchema = z.object({
+  publicToken: z.string().trim().min(1, 'publicToken is required.'),
+})
 
 const configuration = new Configuration({
   basePath: PlaidEnvironments[process.env.PLAID_ENV as keyof typeof PlaidEnvironments ?? 'sandbox'],
@@ -18,9 +23,19 @@ export async function POST(request: Request) {
   const { user, error: authError } = await getAuthUser(request)
   if (!user) return Response.json({ error: authError }, { status: 401 })
 
+  let publicToken: string
   try {
-    const { publicToken } = await request.json()
+    const body = await request.json()
+    const parsed = exchangeTokenSchema.safeParse(body)
+    if (!parsed.success) {
+      return Response.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request body.' }, { status: 400 })
+    }
+    publicToken = parsed.data.publicToken
+  } catch {
+    return Response.json({ error: 'Invalid request body.' }, { status: 400 })
+  }
 
+  try {
     const exchangeResponse = await plaidClient.itemPublicTokenExchange({
       public_token: publicToken,
     })

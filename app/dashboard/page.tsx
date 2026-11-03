@@ -8,6 +8,7 @@ import Navbar from '@/components/Navbar'
 import Toast from '@/components/Toast'
 import type { User } from '@supabase/supabase-js'
 import { evaluateBalanceChange, formatMoney, type BalanceMode } from '@/lib/balance'
+import { centsToDollars, dollarsToCents, parseMoneyToCents } from '@/lib/money'
 import { totalSaved as computeTotalSaved, weeklyChange, type HistorySnapshot } from '@/lib/savings'
 import { GOAL_DAYS, getStatus, daysLeft, type GoalType, type StatusLabel } from '@/lib/pace'
 
@@ -153,21 +154,39 @@ function GoalCreationForm({ userId, onCreated }: { userId: string; onCreated: ()
 
   const atLeastOneFilled = isFilled(sixMonth) || isFilled(oneYear) || isFilled(fiveYear)
 
+  // A filled card's amount must parse; an unfilled one defaults to 0 rather than blocking submit.
+  function amountCentsOrError(f: GoalField, label: string): { cents: number } | { error: string } {
+    if (!isFilled(f)) return { cents: 0 }
+    const parsed = parseMoneyToCents(f.amount)
+    if (!parsed.ok) return { error: `${label}: ${parsed.message}` }
+    return { cents: parsed.cents }
+  }
+
   async function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault()
     if (!atLeastOneFilled) return
+
+    const six = amountCentsOrError(sixMonth, '6-Month Goal')
+    const one = amountCentsOrError(oneYear, '1-Year Goal')
+    const five = amountCentsOrError(fiveYear, '5-Year Goal')
+    const firstError = [six, one, five].find((r): r is { error: string } => 'error' in r)
+    if (firstError) {
+      setError(firstError.error)
+      return
+    }
+
     setSaving(true)
     setError('')
 
     const { error: err } = await supabase.from('goals').upsert(
       {
         user_session_id: userId,
-        goal_6month_title: sixMonth.title.trim(),
-        goal_6month_amount: parseFloat(sixMonth.amount) || 0,
-        goal_1year_title: oneYear.title.trim(),
-        goal_1year_amount: parseFloat(oneYear.amount) || 0,
-        goal_5year_title: fiveYear.title.trim(),
-        goal_5year_amount: parseFloat(fiveYear.amount) || 0,
+        goal_6month_title: sixMonth.title.trim().slice(0, 80),
+        goal_6month_amount: centsToDollars((six as { cents: number }).cents),
+        goal_1year_title: oneYear.title.trim().slice(0, 80),
+        goal_1year_amount: centsToDollars((one as { cents: number }).cents),
+        goal_5year_title: fiveYear.title.trim().slice(0, 80),
+        goal_5year_amount: centsToDollars((five as { cents: number }).cents),
       },
       { onConflict: 'user_session_id' },
     )
@@ -231,6 +250,7 @@ function GoalCreationForm({ userId, onCreated }: { userId: string; onCreated: ()
                     <label className="mb-1.5 block text-xs font-medium text-[#64748B]">Goal title</label>
                     <input
                       type="text"
+                      maxLength={80}
                       placeholder="e.g. Emergency fund"
                       value={state.title}
                       onChange={(e) => set({ ...state, title: e.target.value })}
@@ -612,16 +632,11 @@ export default function DashboardPage() {
 
   async function saveProgress(type: GoalType, amount: number) {
     if (!user) return
-    const [progressWrite, historyWrite] = await Promise.all([
-      supabase.from('goal_progress').upsert(
-        { user_session_id: user.id, goal_type: type, current_amount: amount },
-        { onConflict: 'user_session_id,goal_type' },
-      ),
-      supabase.from('goal_progress_history').insert({
-        user_session_id: user.id, goal_type: type, current_amount: amount,
-      }),
-    ])
-    const writeError = progressWrite.error ?? historyWrite.error
+    // One transaction: the balance upsert and the history insert either both land or neither does.
+    const { error: writeError } = await supabase.rpc('save_progress', {
+      goal_type: type,
+      amount_cents: dollarsToCents(amount),
+    })
     if (writeError) {
       setToast({ message: `Could not update balance: ${writeError.message}`, type: 'error' })
       await loadData()

@@ -6,6 +6,9 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import Navbar from '@/components/Navbar'
 import Toast from '@/components/Toast'
+import { centsToDollars, parseMoneyToCents } from '@/lib/money'
+
+const MAX_TITLE_LENGTH = 80
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -111,8 +114,13 @@ function GoalCard({
   }
 
   async function handleSave() {
-    const newTitle = draftTitle.trim()
-    const newAmount = parseFloat(draftAmount) || 0
+    const newTitle = draftTitle.trim().slice(0, MAX_TITLE_LENGTH)
+    const parsed = parseMoneyToCents(draftAmount)
+    if (!parsed.ok) {
+      onToast(parsed.message, 'error')
+      return
+    }
+    const newAmount = centsToDollars(parsed.cents)
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { onToast('Not authenticated', 'error'); setSaving(false); return }
@@ -227,6 +235,7 @@ function GoalCard({
               <input
                 type="text"
                 autoFocus
+                maxLength={MAX_TITLE_LENGTH}
                 value={draftTitle}
                 onChange={(e) => setDraftTitle(e.target.value)}
                 placeholder={label}
@@ -337,11 +346,14 @@ export default function GoalsPage() {
   async function handleReset() {
     if (!userId) return
     setResetting(true)
-    await Promise.all([
-      supabase.from('goal_progress_history').delete().eq('user_session_id', userId),
-      supabase.from('goal_progress').delete().eq('user_session_id', userId),
-    ])
-    await supabase.from('goals').delete().eq('user_session_id', userId)
+    // One transaction: history, progress and goals are deleted together, or not at all.
+    const { error } = await supabase.rpc('reset_goals')
+    setResetting(false)
+    if (error) {
+      setToast({ message: `Could not reset goals: ${error.message}`, type: 'error' })
+      setConfirmReset(false)
+      return
+    }
     router.push('/dashboard')
   }
 
